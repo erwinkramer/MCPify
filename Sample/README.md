@@ -11,12 +11,26 @@ This application:
 
 ## Running the Sample
 
+**HTTP Only:**
 ```bash
 cd Sample
-dotnet run
+dotnet run --launch-profile http
 ```
 
-The application will start and listen on `http://localhost:5000` (or the port shown in the console).
+**HTTPS (Recommended):**
+```bash
+cd Sample
+dotnet run --launch-profile https
+```
+
+The application will start and listen on:
+- HTTP: `http://localhost:5000`
+- HTTPS: `https://localhost:5001` (when using https profile)
+
+**Note:** The first time you run with HTTPS, you may need to trust the development certificate:
+```bash
+dotnet dev-certs https --trust
+```
 
 ## MCP Endpoints
 
@@ -24,14 +38,24 @@ Once running, the following endpoints are available:
 
 - **`/sse`** - Server-Sent Events endpoint for MCP communication
 - **`/messages`** - HTTP messages endpoint for MCP communication
-- **`/`** - Simple status page
+- **`/status`** - Simple status page
+
+For HTTPS connections, use:
+- `https://localhost:5001/sse`
+- `https://localhost:5001/messages`
 
 ## Connecting an MCP Client
 
 You can connect any MCP client to this server using the SSE endpoint:
 
+**HTTP:**
 ```
 http://localhost:5000/sse
+```
+
+**HTTPS (Recommended):**
+```
+https://localhost:5001/sse
 ```
 
 ### Example with Claude Desktop
@@ -42,7 +66,7 @@ Add to your Claude Desktop configuration (`claude_desktop_config.json`):
 {
   "mcpServers": {
     "petstore": {
-      "url": "http://localhost:5000/sse"
+      "url": "https://localhost:5001/sse"
     }
   }
 }

@@ -20,6 +20,6 @@ var app = builder.Build();
 // Map the MCP endpoint (default path is empty string, which creates /sse and /messages endpoints)
 app.MapMcpifyEndpoint();
 
-app.MapGet("/", () => "MCPify Sample - MCP Server is running! Connect via /sse or /messages endpoints.");
+app.MapGet("/status", () => "MCPify Sample - MCP Server is running! Connect via /sse or /messages endpoints.");
 
 app.Run();
