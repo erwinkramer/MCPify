@@ -1,3 +1,4 @@
+using Microsoft.OpenApi.Any;
 using Microsoft.OpenApi.Models;
 using System.Text.Json;
 
@@ -82,7 +83,7 @@ public class DefaultJsonSchemaGenerator : IJsonSchemaGenerator
 
         if (!string.IsNullOrEmpty(schema.Type))
         {
-            result["type"] = schema.Type;
+            result["type"] = schema.Type == "file" ? "string" : schema.Type;
         }
 
         if (!string.IsNullOrEmpty(schema.Format))
@@ -97,7 +98,28 @@ public class DefaultJsonSchemaGenerator : IJsonSchemaGenerator
 
         if (schema.Enum?.Count > 0)
         {
-            result["enum"] = schema.Enum.Select(e => e.ToString()).ToList();
+            var enumValues = new List<object>();
+            foreach (var item in schema.Enum)
+            {
+                if (item is OpenApiString str)
+                {
+                    enumValues.Add(str.Value);
+                }
+                else if (item is OpenApiInteger i)
+                {
+                    enumValues.Add(i.Value);
+                }
+                else if (item is OpenApiDouble d)
+                {
+                    enumValues.Add(d.Value);
+                }
+                else
+                {
+                    // Fallback for other types
+                    enumValues.Add(item.ToString() ?? "");
+                }
+            }
+            result["enum"] = enumValues;
         }
 
         if (schema.Properties?.Count > 0)
