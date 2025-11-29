@@ -54,11 +54,11 @@ public class AspNetCoreEndpointMetadataProvider : IEndpointMetadataProvider
 
         var httpMethod = method.ToUpperInvariant() switch
         {
-            "GET" => OperationType.Get,
-            "POST" => OperationType.Post,
-            "PUT" => OperationType.Put,
-            "DELETE" => OperationType.Delete,
-            "PATCH" => OperationType.Patch,
+            var m when m == HttpMethods.Get => OperationType.Get,
+            var m when m == HttpMethods.Post => OperationType.Post,
+            var m when m == HttpMethods.Put => OperationType.Put,
+            var m when m == HttpMethods.Delete => OperationType.Delete,
+            var m when m == HttpMethods.Patch => OperationType.Patch,
             _ => OperationType.Get
         };
 
@@ -101,7 +101,7 @@ public class AspNetCoreEndpointMetadataProvider : IEndpointMetadataProvider
                 Name = parameter.Name,
                 In = ParameterLocation.Path,
                 Required = true,
-                Schema = new OpenApiSchema { Type = "string" }
+                Schema = new OpenApiSchema { Type = Constants.OpenApiTypes.String }
             });
         }
 
@@ -131,7 +131,7 @@ public class AspNetCoreEndpointMetadataProvider : IEndpointMetadataProvider
                         Required = !IsNullable(param),
                         Content = new Dictionary<string, OpenApiMediaType>
                         {
-                            ["application/json"] = new OpenApiMediaType
+                            [Constants.MediaTypes.ApplicationJson] = new OpenApiMediaType
                             {
                                 Schema = InferSchema(param.ParameterType)
                             }
@@ -196,31 +196,31 @@ public class AspNetCoreEndpointMetadataProvider : IEndpointMetadataProvider
         if (underlyingType == typeof(int) || underlyingType == typeof(long) ||
             underlyingType == typeof(short) || underlyingType == typeof(byte))
         {
-            return new OpenApiSchema { Type = "integer" };
+            return new OpenApiSchema { Type = Constants.OpenApiTypes.Integer };
         }
 
         if (underlyingType == typeof(float) || underlyingType == typeof(double) ||
             underlyingType == typeof(decimal))
         {
-            return new OpenApiSchema { Type = "number" };
+            return new OpenApiSchema { Type = Constants.OpenApiTypes.Number };
         }
 
         if (underlyingType == typeof(bool))
         {
-            return new OpenApiSchema { Type = "boolean" };
+            return new OpenApiSchema { Type = Constants.OpenApiTypes.Boolean };
         }
 
         if (underlyingType == typeof(string) || underlyingType == typeof(Guid) ||
             underlyingType == typeof(DateTime) || underlyingType == typeof(DateTimeOffset))
         {
-            return new OpenApiSchema { Type = "string" };
+            return new OpenApiSchema { Type = Constants.OpenApiTypes.String };
         }
 
         if (underlyingType.IsEnum)
         {
             return new OpenApiSchema
             {
-                Type = "string",
+                Type = Constants.OpenApiTypes.String,
                 Enum = Enum.GetNames(underlyingType)
                     .Select(name => (Microsoft.OpenApi.Any.IOpenApiAny)new Microsoft.OpenApi.Any.OpenApiString(name))
                     .ToList()
@@ -231,7 +231,7 @@ public class AspNetCoreEndpointMetadataProvider : IEndpointMetadataProvider
         {
             return new OpenApiSchema
             {
-                Type = "array",
+                Type = Constants.OpenApiTypes.Array,
                 Items = InferSchema(underlyingType.GetElementType()!)
             };
         }
@@ -243,14 +243,14 @@ public class AspNetCoreEndpointMetadataProvider : IEndpointMetadataProvider
         {
             return new OpenApiSchema
             {
-                Type = "array",
+                Type = Constants.OpenApiTypes.Array,
                 Items = InferSchema(underlyingType.GetGenericArguments()[0])
             };
         }
 
         var schema = new OpenApiSchema
         {
-            Type = "object",
+            Type = Constants.OpenApiTypes.Object,
             Properties = new Dictionary<string, OpenApiSchema>(),
             Required = new HashSet<string>()
         };

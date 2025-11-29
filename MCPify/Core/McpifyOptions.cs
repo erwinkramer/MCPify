@@ -14,6 +14,14 @@ public class McpifyOptions
     public IJsonSchemaGenerator? SchemaGeneratorOverride { get; set; }
 
     public Dictionary<string, string> DefaultHeaders { get; set; } = new();
+
+    public McpTransportType Transport { get; set; } = McpTransportType.Http;
+}
+
+public enum McpTransportType
+{
+    Http,
+    Stdio
 }
 
 public class LocalEndpointsOptions

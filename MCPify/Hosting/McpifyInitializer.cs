@@ -97,7 +97,7 @@ internal class McpifyInitializer : IHostedService
         {
             var server = _serviceProvider.GetService<IServer>();
             var addresses = server?.Features.Get<IServerAddressesFeature>()?.Addresses;
-            return addresses?.FirstOrDefault() ?? "http://localhost:5000";
+            return addresses?.FirstOrDefault() ?? Constants.DefaultBaseUrl;
         }
 
         var count = 0;

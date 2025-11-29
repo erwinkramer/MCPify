@@ -23,8 +23,15 @@ public static class McpifyServiceExtensions
 
         services.AddSingleton<McpServerPrimitiveCollection<McpServerTool>>();
 
-        services.AddMcpServer()
-            .WithHttpTransport();
+        var serverBuilder = services.AddMcpServer();
+        if (opts.Transport == McpTransportType.Stdio)
+        {
+            serverBuilder.WithStdioServerTransport();
+        }
+        else
+        {
+            serverBuilder.WithHttpTransport();
+        }
 
         services.AddHttpClient();
 
