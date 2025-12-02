@@ -1,119 +1,124 @@
-# MCPify Sample Application
+# MCPify
 
-This sample demonstrates how to use MCPify to expose the Swagger Petstore API as an MCP server.
+**MCPify** is a library that bridges the gap between ASP.NET Core APIs and the **Model Context Protocol (MCP)**. It allows you to effortlessly expose your existing REST endpoints (OpenAPI/Swagger) and internal Minimal APIs as MCP Tools, making them accessible to AI agents like Claude Desktop, Cursor, and others.
 
-## What This Does
+## 🚀 Features
 
-This application:
-1. Loads the Swagger Petstore OpenAPI specification from `https://petstore.swagger.io/v2/swagger.json`
-2. Dynamically generates MCP tools for each API operation
-3. Exposes an MCP server with HTTP transport (SSE) endpoints
+- **OpenAPI Bridge:** Automatically converts any Swagger/OpenAPI specification (JSON/YAML) into MCP Tools.
+- **Local Endpoint Bridge:** Automatically discovers and exposes your application's ASP.NET Core Minimal APIs as MCP Tools.
+- **Zero-Config Stdio Support:** Built-in support for standard input/output (Stdio) transport, perfect for local integration with AI desktop apps.
+- **HTTP (SSE) Support:** Full support for Server-Sent Events (SSE) for remote or multi-client scenarios.
+- **Schema Generation:** Automatic JSON schema generation for API parameters and request bodies.
 
-## Running the Sample
+## 📦 Installation
 
-To start the server, run the following command in the `Sample` directory:
+Install the package via NuGet:
 
 ```bash
-cd Sample
-dotnet run
-````
-
-The application will start and listen on **HTTP port 5000**:
-
-  - URL: `http://localhost:5000`
-
-## MCP Endpoints
-
-Once running, the following endpoints are available:
-
-  - **`/sse`** - Server-Sent Events endpoint for MCP communication
-  - **`/messages`** - HTTP messages endpoint for MCP communication
-  - **`/status`** - Simple status page to verify the server is running
-
-## Connecting an MCP Client
-
-You can connect any MCP client to this server using the SSE endpoint.
-
-**Connection URL:**
-
-```
-http://localhost:5000/sse
+dotnet add package MCPify
 ```
 
-### Example: Claude Desktop
+## 🏁 Quick Start
 
-Add the following to your Claude Desktop configuration (`claude_desktop_config.json`):
+### 1. Setup in Program.cs
 
-```json
+Configure MCPify in your ASP.NET Core application:
+
+```csharp
+using MCPify.Core;
+using MCPify.Hosting;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Add MCPify Services
+builder.Services.AddMcpify(options =>
 {
-  "mcpServers": {
-    "petstore": {
-      "url": "http://localhost:5000/sse"
+    // Choose Transport (Stdio for local tools, Http for remote)
+    options.Transport = McpTransportType.Stdio;
+    
+    // Enable automatic discovery of local Minimal API endpoints
+    options.LocalEndpoints = new()
+    {
+        Enabled = true,
+        ToolPrefix = "local_" // Prefix for generated tools (e.g., local_get_user)
+    };
+
+    // (Optional) Register external APIs via Swagger
+    options.ExternalApis.Add(new()
+    {
+        SwaggerUrl = "https://petstore.swagger.io/v2/swagger.json",
+        ApiBaseUrl = "https://petstore.swagger.io/v2",
+        ToolPrefix = "petstore_"
+    });
+});
+
+var app = builder.Build();
+
+// 2. Map your APIs as usual
+app.MapGet("/api/users/{id}", (int id) => new { Id = id, Name = "John Doe" });
+
+// 3. Register MCP Tools (Critical: Must be called after endpoints are mapped but before Run)
+var registrar = app.Services.GetRequiredService<McpifyServiceRegistrar>();
+await registrar.RegisterToolsAsync(((IEndpointRouteBuilder)app).DataSources);
+
+// 4. Map the MCP Endpoint
+app.MapMcpifyEndpoint(); 
+
+app.Run();
+```
+
+### 2. Connect with Claude Desktop
+
+To use your app as a local tool in Claude Desktop:
+
+1.  **Publish your app** to a single executable or DLL.
+    ```bash
+    dotnet publish -c Release
+    ```
+
+2.  **Update your Claude config** (`%APPDATA%\Claude\claude_desktop_config.json`):
+    ```json
+    {
+      "mcpServers": {
+        "my-api": {
+          "command": "dotnet",
+          "args": [
+            "C:/Path/To/YourApp/bin/Release/net9.0/publish/YourApp.dll"
+          ]
+        }
+      }
     }
-  }
-}
-```
+    ```
 
-### Example: VS Code MCP Extension
+3.  **Restart Claude.** Your API endpoints will now appear as tools (e.g., `local_api_users_get`)!
 
-If you are using a generic MCP extension for VS Code, add this to your configuration file:
+## 📚 Configuration
 
-```json
-{
-  "servers": {
-    "pets-http-sse": {
-      "url": "http://localhost:5000/sse",
-      "type": "http"
-    }
-  },
-  "inputs": []
-}
-```
+### Transport Modes
 
-## Available Tools
+- **Stdio (`McpTransportType.Stdio`)**: Default for local tools. Uses Standard Input/Output.
+    - *Note:* Console logging is automatically disabled in this mode to prevent protocol corruption.
+- **Http (`McpTransportType.Http`)**: Uses Server-Sent Events (SSE).
+    - Default endpoints: `/sse` (connection) and `/messages` (requests).
 
-All Petstore API operations are exposed as MCP tools. By default, they are prefixed with `petstore_`:
+### Local Endpoints
 
-  - `petstore_addPet` - Add a new pet to the store
-  - `petstore_updatePet` - Update an existing pet
-  - `petstore_findPetsByStatus` - Finds pets by status
-  - `petstore_findPetsByTags` - Finds pets by tags
-  - `petstore_getPetById` - Find pet by ID
-  - `petstore_deletePet` - Deletes a pet
-  - And many more...
+MCPify inspects your application's routing table to generate tools.
+- `Enabled`: Set to `true` to enable.
+- `ToolPrefix`: A string to prepend to tool names (e.g., "api_").
+- `Filter`: A function to select which endpoints to expose.
 
-## Customization
+### External APIs
 
-### Filtering Operations
+Proxy external services by providing their OpenAPI spec.
+- `SwaggerUrl`: URL to the `swagger.json`.
+- `ApiBaseUrl`: The base URL where API requests should be sent.
+- `DefaultHeaders`: Custom headers (e.g., Authorization) to include in requests.
 
-You can filter which operations to expose by uncommenting and modifying the filter in `Program.cs`:
+## 🤝 Contributing
 
-```csharp
-options.Filter = op => op.Route.Contains("/pet");
-```
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-### Changing the Prefix
+## 📄 License
 
-Modify the `ToolPrefix` option in `Program.cs`:
-
-```csharp
-options.ToolPrefix = "myapi_";
-```
-
-### Using a Different API
-
-Replace the `swaggerUrl` and `apiBaseUrl` with any OpenAPI/Swagger specification:
-
-```csharp
-builder.Services.AddMcpify(
-    swaggerUrl: "[https://your-api.com/swagger.json](https://your-api.com/swagger.json)",
-    apiBaseUrl: "[https://your-api.com/api](https://your-api.com/api)",
-    options => { /* ... */ });
-```
-
-
-## Learn More
-
-  - [MCPify Documentation](https://www.google.com/search?q=../README.md)
-  - [Model Context Protocol Specification](https://modelcontextprotocol.io/)
-  - [MCP C\# SDK](https://github.com/modelcontextprotocol/csharp-sdk)
+This project is licensed under the MIT License.
