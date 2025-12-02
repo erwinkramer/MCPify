@@ -1,8 +1,21 @@
+using MCPify.Core;
 using MCPify.Hosting;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddLogging();
+var transport = builder.Configuration.GetValue<McpTransportType>("Mcpify:Transport", McpTransportType.Stdio);
+
+if (transport == McpTransportType.Stdio)
+{
+    builder.Logging.ClearProviders();
+}
+else
+{
+    builder.Services.AddLogging();
+}
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowAll", policy =>
@@ -18,6 +31,7 @@ builder.Services.AddMcpifyTestTool();
 
 builder.Services.AddMcpify(options =>
 {
+    options.Transport = transport;
     options.LocalEndpoints = new()
     {
         Enabled = true,
@@ -31,37 +45,37 @@ builder.Services.AddMcpify(options =>
         ToolPrefix = "petstore_"
     });
 
-    options.ExternalApis.Add(new()
+    if (File.Exists("sample-api.json"))
     {
-        SwaggerFilePath = "sample-api.json",
-        ApiBaseUrl = "http://localhost:5000",
-        ToolPrefix = "file_"
-    });
+        options.ExternalApis.Add(new()
+        {
+            SwaggerFilePath = "sample-api.json",
+            ApiBaseUrl = "http://localhost:5000",
+            ToolPrefix = "file_"
+        });
+    }
 });
 
 var app = builder.Build();
 
-app.Use(async (context, next) =>
+if (transport != McpTransportType.Stdio)
 {
-    Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {context.Request.Method} {context.Request.Path}");
-    await next();
-});
-
-app.Use(async (context, next) =>
-{
-    if (context.Request.Method == "POST" && context.Request.Path == "/sse")
+    app.Use(async (context, next) =>
     {
-        Console.WriteLine("Patching Request: Rewriting POST /sse -> /messages");
-        context.Request.Path = "/messages";
-    }
-    await next();
-});
+        Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {context.Request.Method} {context.Request.Path}");
+        await next();
+    });
+}
 
 app.UseCors("AllowAll");
 
 app.MapGet("/api/users/{id}", (int id) => new { Id = id, Name = $"User {id}" });
 app.MapPost("/api/users", (UserRequest user) => new { Id = 123, user.Name, user.Email });
 app.MapGet("/status", () => "MCPify Sample is Running");
+
+// Register MCPify tools after endpoints are mapped but before MCP endpoint is mapped
+var registrar = app.Services.GetRequiredService<McpifyServiceRegistrar>();
+await registrar.RegisterToolsAsync(((IEndpointRouteBuilder)app).DataSources);
 
 app.MapMcpifyEndpoint();
 

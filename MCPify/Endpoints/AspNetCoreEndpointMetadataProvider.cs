@@ -18,10 +18,10 @@ public class AspNetCoreEndpointMetadataProvider : IEndpointMetadataProvider
         _serviceProvider = serviceProvider;
     }
 
-    public IEnumerable<OpenApiOperationDescriptor> GetLocalEndpoints()
+    public IEnumerable<OpenApiOperationDescriptor> GetLocalEndpoints(IEnumerable<EndpointDataSource>? dataSources = null)
     {
         var descriptors = new List<OpenApiOperationDescriptor>();
-        var endpointSources = _serviceProvider.GetServices<EndpointDataSource>();
+        var endpointSources = dataSources ?? _serviceProvider.GetServices<EndpointDataSource>();
 
         foreach (var source in endpointSources)
         {
