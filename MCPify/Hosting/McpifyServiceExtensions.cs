@@ -50,7 +50,7 @@ public static class McpifyServiceExtensions
             });
 
         services.AddSingleton<IOpenApiProvider>(_ =>
-            opts.ProviderOverride ?? new OpenApiV3Provider());
+            opts.ProviderOverride ?? new OpenApiV3Provider(opts.OpenApiDownloadTimeout));
 
         services.AddSingleton<IJsonSchemaGenerator>(_ =>
             opts.SchemaGeneratorOverride ?? new DefaultJsonSchemaGenerator());

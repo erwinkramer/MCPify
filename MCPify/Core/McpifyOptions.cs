@@ -1,5 +1,6 @@
 using MCPify.OpenApi;
 using MCPify.Schema;
+using MCPify.Core.Auth;
 
 namespace MCPify.Core;
 
@@ -14,6 +15,8 @@ public class McpifyOptions
     public IJsonSchemaGenerator? SchemaGeneratorOverride { get; set; }
 
     public Dictionary<string, string> DefaultHeaders { get; set; } = new();
+
+    public TimeSpan OpenApiDownloadTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     public McpTransportType Transport { get; set; } = McpTransportType.Http;
 }
@@ -33,6 +36,8 @@ public class LocalEndpointsOptions
     public Func<OpenApiOperationDescriptor, bool>? Filter { get; set; }
 
     public Dictionary<string, string> DefaultHeaders { get; set; } = new();
+
+    public IAuthenticationProvider? Authentication { get; set; }
 }
 
 public class ExternalApiOptions
@@ -48,4 +53,6 @@ public class ExternalApiOptions
     public Func<OpenApiOperationDescriptor, bool>? Filter { get; set; }
 
     public Dictionary<string, string> DefaultHeaders { get; set; } = new();
+
+    public IAuthenticationProvider? Authentication { get; set; }
 }

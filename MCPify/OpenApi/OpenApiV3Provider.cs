@@ -6,9 +6,19 @@ namespace MCPify.OpenApi;
 
 public class OpenApiV3Provider : IOpenApiProvider
 {
+    private readonly TimeSpan _timeout;
+
+    public OpenApiV3Provider(TimeSpan? timeout = null)
+    {
+        _timeout = timeout ?? TimeSpan.FromSeconds(30);
+    }
+
     public async Task<OpenApiDocument> LoadAsync(string source)
     {
-        using var httpClient = new HttpClient();
+        using var httpClient = new HttpClient
+        {
+            Timeout = _timeout
+        };
 
         Stream stream;
         if (Uri.IsWellFormedUriString(source, UriKind.Absolute))

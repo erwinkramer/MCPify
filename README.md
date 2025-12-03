@@ -57,7 +57,7 @@ var app = builder.Build();
 // 2. Map your APIs as usual
 app.MapGet("/api/users/{id}", (int id) => new { Id = id, Name = "John Doe" });
 
-// 3. Register MCP Tools (Critical: Must be called after endpoints are mapped but before Run)
+// 3. Register MCP Tools (Must be called after endpoints are mapped but before Run)
 var registrar = app.Services.GetRequiredService<McpifyServiceRegistrar>();
 await registrar.RegisterToolsAsync(((IEndpointRouteBuilder)app).DataSources);
 
@@ -114,6 +114,27 @@ Proxy external services by providing their OpenAPI spec.
 - `SwaggerUrl`: URL to the `swagger.json`.
 - `ApiBaseUrl`: The base URL where API requests should be sent.
 - `DefaultHeaders`: Custom headers (e.g., Authorization) to include in requests.
+
+### Authentication
+
+Secure your external or local endpoints using built-in authentication providers.
+
+```csharp
+using MCPify.Core.Auth;
+
+// ...
+
+options.ExternalApis.Add(new()
+{
+    // ...
+    Authentication = new ApiKeyAuthentication("api-key", "secret", ApiKeyLocation.Header)
+});
+
+// Supported Providers:
+// - ApiKeyAuthentication(name, value, location)
+// - BearerAuthentication(token)
+// - BasicAuthentication(username, password)
+```
 
 ## 🤝 Contributing
 

@@ -80,7 +80,7 @@ public static class McpifyEndpointExtensions
                                 DefaultHeaders = options.LocalEndpoints.DefaultHeaders
                             };
 
-                            var tool = new OpenApiProxyTool(descriptor, BaseUrlProvider, httpClient, app.Services.GetRequiredService<IJsonSchemaGenerator>(), localOpts);
+                            var tool = new OpenApiProxyTool(descriptor, BaseUrlProvider, httpClient, app.Services.GetRequiredService<IJsonSchemaGenerator>(), localOpts, options.LocalEndpoints.Authentication);
                             toolCollection.Add(tool);
                             count++;
                         }

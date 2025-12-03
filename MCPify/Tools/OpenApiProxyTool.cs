@@ -1,4 +1,5 @@
 using MCPify.Core;
+using MCPify.Core.Auth;
 using MCPify.Schema;
 using Microsoft.OpenApi.Models;
 using ModelContextProtocol.Protocol;
@@ -15,14 +16,16 @@ public class OpenApiProxyTool : McpServerTool
     private readonly Func<string> _apiBaseUrlProvider;
     private readonly OpenApiOperationDescriptor _descriptor;
     private readonly McpifyOptions _options;
+    private readonly IAuthenticationProvider? _authentication;
 
     public OpenApiProxyTool(
         OpenApiOperationDescriptor descriptor,
         string apiBaseUrl,
         HttpClient http,
         IJsonSchemaGenerator schema,
-        McpifyOptions options)
-        : this(descriptor, () => apiBaseUrl, http, schema, options)
+        McpifyOptions options,
+        IAuthenticationProvider? authentication = null)
+        : this(descriptor, () => apiBaseUrl, http, schema, options, authentication)
     {
     }
 
@@ -31,13 +34,15 @@ public class OpenApiProxyTool : McpServerTool
         Func<string> apiBaseUrlProvider,
         HttpClient http,
         IJsonSchemaGenerator schema,
-        McpifyOptions options)
+        McpifyOptions options,
+        IAuthenticationProvider? authentication = null)
     {
         _descriptor = descriptor;
         _apiBaseUrlProvider = apiBaseUrlProvider;
         _http = http;
         _schema = schema;
         _options = options;
+        _authentication = authentication;
     }
 
     public override Tool ProtocolTool => new()
@@ -153,6 +158,8 @@ public class OpenApiProxyTool : McpServerTool
         {
             request.Headers.TryAddWithoutValidation(header.Key, header.Value);
         }
+
+        _authentication?.Apply(request);
 
         return request;
     }
