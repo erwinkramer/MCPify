@@ -24,6 +24,8 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
     private readonly string _callbackHost;
     private readonly Action<string>? _openBrowserAction;
     private readonly bool _usePkce;
+    private readonly Action<string>? _authorizationUrlEmitter;
+    private readonly ISessionTokenStore? _sessionStore;
 
     public OAuthAuthorizationCodeAuthentication(
         string clientId,
@@ -37,7 +39,8 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         string? redirectUri = null,
         string callbackHost = "localhost",
         Action<string>? openBrowserAction = null,
-        bool usePkce = false)
+        bool usePkce = false,
+        Action<string>? authorizationUrlEmitter = null)
     {
         _clientId = clientId;
         _authorizationEndpoint = authorizationEndpoint;
@@ -51,10 +54,26 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         _callbackHost = callbackHost;
         _openBrowserAction = openBrowserAction;
         _usePkce = usePkce;
+        _authorizationUrlEmitter = authorizationUrlEmitter;
+        _sessionStore = tokenStore as ISessionTokenStore;
+    }
+
+    public void SetSession(string sessionId)
+    {
+        if (_sessionStore == null)
+        {
+            throw new InvalidOperationException("Session token store is required for session-scoped authentication.");
+        }
+        _sessionStore.SetSession(sessionId);
     }
 
     public async Task ApplyAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
     {
+        if (_sessionStore != null && _sessionStore.GetCurrentSession() == null)
+        {
+            throw new InvalidOperationException("SessionId not set. Provide a sessionId for this call.");
+        }
+
         var tokenData = await _tokenStore.GetTokenAsync(cancellationToken);
 
         if (tokenData != null && (!tokenData.ExpiresAt.HasValue || tokenData.ExpiresAt.Value > DateTimeOffset.UtcNow.AddMinutes(1)))
@@ -121,11 +140,9 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
             
             var authUrl = $"{_authorizationEndpoint}?{query}";
             
-            if (_openBrowserAction != null)
-            {
-                _openBrowserAction(authUrl);
-            }
-            else
+            _authorizationUrlEmitter?.Invoke(authUrl);
+            _openBrowserAction?.Invoke(authUrl);
+            if (_authorizationUrlEmitter == null && _openBrowserAction == null)
             {
                 OpenBrowser(authUrl);
             }
@@ -135,9 +152,9 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
                 var contextTask = listener.GetContextAsync();
                 // Simple cancellation support
                 using var reg = cancellationToken.Register(() => listener.Stop());
-                
+
                 var context = await contextTask;
-                
+
                 var req = context.Request;
                 var res = context.Response;
 

@@ -11,6 +11,7 @@ public class ClientCredentialsAuthentication : IAuthenticationProvider
     private readonly string _scope;
     private readonly ITokenStore _tokenStore;
     private readonly HttpClient _httpClient;
+    private readonly ISessionTokenStore? _sessionTokenStore;
 
     public ClientCredentialsAuthentication(
         string clientId,
@@ -26,10 +27,12 @@ public class ClientCredentialsAuthentication : IAuthenticationProvider
         _scope = scope;
         _tokenStore = tokenStore;
         _httpClient = httpClient ?? new HttpClient();
+        _sessionTokenStore = tokenStore as ISessionTokenStore;
     }
 
     public async Task ApplyAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
     {
+        // If a session is set by caller, it's already applied via SetSession.
         var tokenData = await _tokenStore.GetTokenAsync(cancellationToken);
 
         if (tokenData != null && (!tokenData.ExpiresAt.HasValue || tokenData.ExpiresAt.Value > DateTimeOffset.UtcNow.AddMinutes(1)))
@@ -69,5 +72,10 @@ public class ClientCredentialsAuthentication : IAuthenticationProvider
             : null;
 
         return new TokenData(accessToken, null, expiresAt);
+    }
+
+    public void SetSession(string sessionId)
+    {
+        _sessionTokenStore?.SetSession(sessionId);
     }
 }

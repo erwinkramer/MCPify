@@ -86,7 +86,10 @@ public class OpenApiProxyToolTests : IAsyncLifetime
     private static HttpRequestMessage BuildRequest(OpenApiProxyTool tool, object? args)
     {
         var method = typeof(OpenApiProxyTool).GetMethod("BuildHttpRequest", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        return (HttpRequestMessage)method.Invoke(tool, new[] { args })!;
+        var dict = args == null
+            ? new Dictionary<string, JsonElement>()
+            : JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(args))!;
+        return (HttpRequestMessage)method.Invoke(tool, new object?[] { dict })!;
     }
 
     private sealed class TrackingAuthProvider : IAuthenticationProvider

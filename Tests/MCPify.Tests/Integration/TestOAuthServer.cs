@@ -21,8 +21,8 @@ public sealed class TestOAuthServer : IAsyncDisposable
     private readonly string _audience = "client_id";
     public string ClientCredentialsToken => "cc_token";
 
-    private string? _lastAuthCode;
     private string? _lastRefreshToken;
+    private string? _lastAuthCode;
     private string? _lastDeviceCode;
     private bool _deviceAuthorized;
 

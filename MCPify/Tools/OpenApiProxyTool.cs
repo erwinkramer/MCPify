@@ -1,5 +1,6 @@
 using MCPify.Core;
 using MCPify.Core.Auth;
+using MCPify.Core.Auth.OAuth;
 using MCPify.Schema;
 using Microsoft.OpenApi.Models;
 using ModelContextProtocol.Protocol;
@@ -59,8 +60,25 @@ public class OpenApiProxyTool : McpServerTool
         RequestContext<CallToolRequestParams> context,
         CancellationToken token)
     {
-        var arguments = context.Params?.Arguments;
-        var request = BuildHttpRequest(arguments);
+        var argsDict = context.Params?.Arguments != null
+            ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(context.Params.Arguments))
+            : new Dictionary<string, JsonElement>();
+
+        if (_authentication is OAuthAuthorizationCodeAuthentication sessionAware &&
+            argsDict != null &&
+            argsDict.TryGetValue("sessionId", out var sessionIdElement) &&
+            sessionIdElement.ValueKind == JsonValueKind.String)
+        {
+            var sessionId = sessionIdElement.GetString();
+            if (!string.IsNullOrEmpty(sessionId))
+            {
+                sessionAware.SetSession(sessionId);
+            }
+
+            argsDict.Remove("sessionId");
+        }
+
+        var request = BuildHttpRequest(argsDict);
 
         if (_authentication != null)
         {
@@ -94,19 +112,15 @@ public class OpenApiProxyTool : McpServerTool
         };
     }
 
-    private HttpRequestMessage BuildHttpRequest(object? arguments)
+    private HttpRequestMessage BuildHttpRequest(Dictionary<string, JsonElement>? argsDict)
     {
         var route = _descriptor.Route;
         var queryParams = new List<string>();
         object? bodyContent = null;
         var headers = new Dictionary<string, string>();
 
-        if (arguments != null)
+        if (argsDict != null)
         {
-            var argsDict = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
-                JsonSerializer.Serialize(arguments)
-            ) ?? new Dictionary<string, JsonElement>();
-
             foreach (var param in _descriptor.Operation.Parameters ?? Enumerable.Empty<OpenApiParameter>())
             {
                 if (!argsDict.TryGetValue(param.Name, out var value))
