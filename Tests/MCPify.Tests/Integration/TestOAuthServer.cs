@@ -19,6 +19,7 @@ public sealed class TestOAuthServer : IAsyncDisposable
     private readonly JsonWebKey _jwk;
     private readonly object _lock = new();
     private readonly string _audience = "client_id";
+    public string ClientCredentialsToken => "cc_token";
 
     private string? _lastAuthCode;
     private string? _lastRefreshToken;
@@ -113,6 +114,17 @@ public sealed class TestOAuthServer : IAsyncDisposable
             {
                 var form = await context.Request.ReadFormAsync();
                 var grantType = form["grant_type"].ToString();
+
+                if (grantType == "client_credentials")
+                {
+                    await context.Response.WriteAsJsonAsync(new
+                    {
+                        access_token = ClientCredentialsToken,
+                        token_type = "Bearer",
+                        expires_in = 3600
+                    });
+                    return;
+                }
 
                 if (grantType == "authorization_code")
                 {

@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Web;
@@ -22,6 +23,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
     private readonly string? _redirectUri;
     private readonly string _callbackHost;
     private readonly Action<string>? _openBrowserAction;
+    private readonly bool _usePkce;
 
     public OAuthAuthorizationCodeAuthentication(
         string clientId,
@@ -34,7 +36,8 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         string callbackPath = "/callback",
         string? redirectUri = null,
         string callbackHost = "localhost",
-        Action<string>? openBrowserAction = null)
+        Action<string>? openBrowserAction = null,
+        bool usePkce = false)
     {
         _clientId = clientId;
         _authorizationEndpoint = authorizationEndpoint;
@@ -47,6 +50,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         _redirectUri = redirectUri;
         _callbackHost = callbackHost;
         _openBrowserAction = openBrowserAction;
+        _usePkce = usePkce;
     }
 
     public async Task ApplyAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
@@ -82,6 +86,8 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
 
     private async Task<TokenData> PerformLoginAsync(CancellationToken cancellationToken)
     {
+        (string CodeVerifier, string CodeChallenge)? pkce = _usePkce ? GeneratePkcePair() : null;
+
         try
         {
             string redirectUri;
@@ -107,6 +113,11 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
             query["redirect_uri"] = redirectUri;
             query["scope"] = _scope;
             query["state"] = state;
+            if (_usePkce && pkce.HasValue)
+            {
+                query["code_challenge"] = pkce.Value.CodeChallenge;
+                query["code_challenge_method"] = "S256";
+            }
             
             var authUrl = $"{_authorizationEndpoint}?{query}";
             
@@ -148,7 +159,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
 
                 await SendResponseAsync(res, "<html><body><h1>Login Successful</h1><p>You can close this window and return to the application.</p><script>window.close();</script></body></html>", cancellationToken);
 
-                return await ExchangeCodeForTokenAsync(code, redirectUri, cancellationToken);
+                return await ExchangeCodeForTokenAsync(code, redirectUri, pkce?.CodeVerifier, cancellationToken);
             }
             catch (HttpListenerException) when (cancellationToken.IsCancellationRequested)
             {
@@ -170,7 +181,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         response.OutputStream.Close();
     }
 
-    private async Task<TokenData> ExchangeCodeForTokenAsync(string code, string redirectUri, CancellationToken cancellationToken)
+    private async Task<TokenData> ExchangeCodeForTokenAsync(string code, string redirectUri, string? codeVerifier, CancellationToken cancellationToken)
     {
         var form = new Dictionary<string, string>
         {
@@ -179,6 +190,11 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
             { "code", code },
             { "redirect_uri", redirectUri }
         };
+
+        if (!string.IsNullOrEmpty(codeVerifier))
+        {
+            form["code_verifier"] = codeVerifier;
+        }
 
         if (!string.IsNullOrEmpty(_clientSecret))
         {
@@ -248,6 +264,25 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    private static (string CodeVerifier, string CodeChallenge) GeneratePkcePair()
+    {
+        Span<byte> bytes = stackalloc byte[32];
+        RandomNumberGenerator.Fill(bytes);
+        var verifier = Base64UrlEncode(bytes);
+
+        using var sha = SHA256.Create();
+        var challenge = Base64UrlEncode(sha.ComputeHash(Encoding.ASCII.GetBytes(verifier)));
+        return (verifier, challenge);
+    }
+
+    private static string Base64UrlEncode(ReadOnlySpan<byte> bytes)
+    {
+        return Convert.ToBase64String(bytes)
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
     }
 
     private void OpenBrowser(string url)
