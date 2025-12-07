@@ -5,7 +5,7 @@ This sample demonstrates how to use **MCPify** to expose ASP.NET Core endpoints 
 What this sample includes:
 - Minimal API endpoints exposed as MCP tools.
 - A live remote OpenAPI demo: Petstore (`https://petstore3.swagger.io/api/v3/openapi.json`) registered as `petstore_*` tools to show external swagger support.
-- An optional in-app OAuth/OIDC provider (authorize/token/device code) for demonstrating auth flows end to end (opt-in).
+- An in-app OAuth/OIDC provider (authorize/token/device code) for demonstrating auth flows end to end (enabled by default via `Demo:EnableOAuth` in `appsettings*.json`).
 - A generated `mock-api.json` OpenAPI document to showcase external API bridging when OAuth demo is enabled (ignored by git).
 
 It supports two modes of operation:
@@ -79,8 +79,8 @@ To run the server in HTTP mode (using Server-Sent Events):
 
 ### Choose your demo level
 
-- **Simplest (local endpoints only):** Run `dotnet run` (or published binary) with default settings. This exposes minimal APIs as tools and skips the OAuth demo.
-- **OAuth/OIDC demo enabled:** Pass `--Demo:EnableOAuth=true` (or set in `appsettings.json`). This spins up the mock OAuth provider, generates `mock-api.json`, and registers `secure_` tools that exercise auth code flow end to end.
+- **OAuth/OIDC demo (default via appsettings):** No extra flags needed. The mock OAuth provider is on, `mock-api.json` is generated, and `secure_` tools exercise auth code flow end to end.
+- **Simplest (local endpoints only):** Disable the OAuth demo via `--Demo:EnableOAuth=false` (or set in `appsettings*.json`). This skips the mock OAuth provider and `secure_` tools.
 
 ## Using MCPify as a NuGet Package
 
