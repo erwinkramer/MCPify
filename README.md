@@ -175,7 +175,7 @@ AuthenticationFactory = sp => new OAuthAuthorizationCodeAuthentication(
 
 // Ensure your app maps the callback endpoint, e.g., app.MapAuthCallback("/auth/callback");
 ```
-When a client like Claude Desktop needs to authenticate, it will be challenged (via `WWW-Authenticate` header) and directed to your app's `/.well-known/oauth-protected-resource` endpoint to discover the Authorization Server. It then initiates the OAuth 2.0 Authorization Code flow. After successful authentication, the client sends the obtained `Bearer` token to MCPify, which is then passed through to the target API.
+Experimental desktop workflow note: most MCP clients do not automatically capture the browser redirect yet. Users typically copy the code/token from the browser page back into the MCP client. The `LoginTool` and callbacks are wired, but a smooth handoff depends on client support for the required arguments—treat this as experimental until mcp clients fully supports the flow.
 
 #### OAuth 2.0 Device Flow (Headless)
 Best for remote servers or containers. MCPify's `LoginTool` can also initiate this flow, providing a code for the user to enter on a separate device.
