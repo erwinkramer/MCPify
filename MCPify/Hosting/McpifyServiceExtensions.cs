@@ -9,6 +9,7 @@ using System.Net.Http;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using MCPify.Core.Auth;
+using MCPify.Core.Session;
 using System.IO;
 
 namespace MCPify.Hosting;
@@ -32,6 +33,13 @@ public static class McpifyServiceExtensions
 
         services.AddSingleton<McpServerPrimitiveCollection<McpServerTool>>();
         services.AddSingleton<McpifyServiceRegistrar>();
+        
+        // Register Session Map for "Lazy Authentication"
+        services.AddSingleton<ISessionMap, InMemorySessionMap>();
+        
+        // Register Core Tools
+        services.AddSingleton<McpServerTool, LoginTool>();
+        services.AddSingleton<McpServerTool, SessionManagementTool>();
 
         var serverBuilder = services.AddMcpServer();
         if (opts.Transport == McpTransportType.Stdio)

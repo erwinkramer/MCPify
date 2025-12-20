@@ -56,7 +56,9 @@ public class McpifyServiceRegistrar
             {
                 if (!toolCollection.Any(t => t.ProtocolTool.Name.Equals(tool.ProtocolTool.Name, StringComparison.OrdinalIgnoreCase)))
                 {
-                    toolCollection.Add(tool);
+                    // Wrap with Session Decorator to ensure context in Stdio/Non-HTTP scenarios
+                    var decoratedTool = new SessionAwareToolDecorator(tool, _serviceProvider);
+                    toolCollection.Add(decoratedTool);
                     _logger.LogDebug("[MCPify] Registered manual tool: {ToolName}", tool.ProtocolTool.Name);
                 }
             }
@@ -145,7 +147,8 @@ public class McpifyServiceRegistrar
                     }
 
                     var tool = new OpenApiProxyTool(descriptor, apiOptions.ApiBaseUrl, httpClient, _schema, apiOpts, apiOptions.AuthenticationFactory);
-                    toolCollection.Add(tool);
+                    var decoratedTool = new SessionAwareToolDecorator(tool, _serviceProvider);
+                    toolCollection.Add(decoratedTool);
                     count++;
                 }
 
@@ -213,7 +216,8 @@ public class McpifyServiceRegistrar
                 : null;
 
             var tool = new OpenApiProxyTool(descriptor, BaseUrlProvider, httpClient, _schema, localOpts, effectiveAuthFactory);
-            toolCollection.Add(tool);
+            var decoratedTool = new SessionAwareToolDecorator(tool, _serviceProvider);
+            toolCollection.Add(decoratedTool);
             count++;
         }
 

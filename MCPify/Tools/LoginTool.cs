@@ -28,14 +28,33 @@ public class LoginTool : McpServerTool
     public override async ValueTask<CallToolResult> InvokeAsync(RequestContext<CallToolRequestParams> context, CancellationToken token)
     {
         var logger = context.Services != null ? context.Services.GetService<Microsoft.Extensions.Logging.ILogger<LoginTool>>() : null;
-        string sessionId = Constants.DefaultSessionId;
+        var accessor = context.Services?.GetService<IMcpContextAccessor>();
 
+        string? sessionId = null;
+
+        // 1. Try to get from arguments
         if (context.Params?.Arguments != null &&
             context.Params.Arguments.TryGetValue("sessionId", out var sessionElement) &&
             sessionElement.ValueKind == JsonValueKind.String &&
             !string.IsNullOrEmpty(sessionElement.GetString()))
         {
-            sessionId = sessionElement.GetString()!;
+            sessionId = sessionElement.GetString();
+        }
+
+        // 2. Try to get from Context Accessor
+        if (string.IsNullOrEmpty(sessionId) && accessor != null)
+        {
+            sessionId = accessor.SessionId;
+        }
+
+        // 3. Backend Fallback: Generate a default random session if none exists
+        if (string.IsNullOrEmpty(sessionId))
+        {
+            sessionId = Guid.NewGuid().ToString("N");
+            if (accessor != null)
+            {
+                accessor.SessionId = sessionId;
+            }
         }
 
         logger?.LogInformation("Initiating login for session {SessionId}", sessionId);

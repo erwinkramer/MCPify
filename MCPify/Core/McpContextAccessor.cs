@@ -20,14 +20,17 @@ public class McpContextAccessor : IMcpContextAccessor
         set
         {
             var holder = _mcpContextCurrent.Value;
-            if (holder != null)
+            if (holder == null)
             {
-                if (holder.Context == null)
-                {
-                    holder.Context = new McpContext();
-                }
-                holder.Context.SessionId = value;
+                holder = new McpContextHolder();
+                _mcpContextCurrent.Value = holder;
             }
+            
+            if (holder.Context == null)
+            {
+                holder.Context = new McpContext();
+            }
+            holder.Context.SessionId = value;
         }
     }
 
@@ -37,14 +40,17 @@ public class McpContextAccessor : IMcpContextAccessor
         set
         {
             var holder = _mcpContextCurrent.Value;
-            if (holder != null)
+            if (holder == null)
             {
-                if (holder.Context == null)
-                {
-                    holder.Context = new McpContext();
-                }
-                holder.Context.ConnectionId = value;
+                holder = new McpContextHolder();
+                _mcpContextCurrent.Value = holder;
             }
+
+            if (holder.Context == null)
+            {
+                holder.Context = new McpContext();
+            }
+            holder.Context.ConnectionId = value;
         }
     }
 
@@ -54,14 +60,17 @@ public class McpContextAccessor : IMcpContextAccessor
         set
         {
             var holder = _mcpContextCurrent.Value;
-            if (holder != null)
+            if (holder == null)
             {
-                if (holder.Context == null)
-                {
-                    holder.Context = new McpContext();
-                }
-                holder.Context.AccessToken = value;
+                holder = new McpContextHolder();
+                _mcpContextCurrent.Value = holder;
             }
+
+            if (holder.Context == null)
+            {
+                holder.Context = new McpContext();
+            }
+            holder.Context.AccessToken = value;
         }
     }
 

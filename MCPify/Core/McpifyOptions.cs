@@ -1,6 +1,7 @@
 using MCPify.OpenApi;
 using MCPify.Schema;
 using MCPify.Core.Auth;
+using Microsoft.AspNetCore.Http;
 
 namespace MCPify.Core;
 
@@ -9,6 +10,12 @@ namespace MCPify.Core;
 /// </summary>
 public class McpifyOptions
 {
+    /// <summary>
+    /// Custom delegate to resolve the Session ID from the current HttpContext.
+    /// If not provided, or returns null, defaults to HttpContext.Items["McpSessionId"] or Constants.DefaultSessionId.
+    /// </summary>
+    public Func<HttpContext, string?>? SessionIdResolver { get; set; }
+
     /// <summary>
     /// Configuration for exposing local ASP.NET Core endpoints as MCP tools.
     /// </summary>

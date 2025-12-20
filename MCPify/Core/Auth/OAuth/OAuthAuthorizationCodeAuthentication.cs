@@ -10,6 +10,8 @@ using System.Web;
 using MCPify.Core;
 using MCPify.Core.Auth;
 
+using MCPify.Core.Session;
+
 namespace MCPify.Core.Auth.OAuth;
 
 public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
@@ -28,6 +30,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
     private readonly Action<string>? _authorizationUrlEmitter;
     private readonly string _stateSecret;
     private readonly bool _allowDefaultSessionFallback;
+    private readonly ISessionMap? _sessionMap; // Optional dependency for Lazy Auth
     private const string _oauthProviderName = "OAuth";
     private const string _pkceStorePrefix = "pkce_";
 
@@ -45,7 +48,8 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         bool usePkce = false,
         Action<string>? authorizationUrlEmitter = null,
         string? stateSecret = null,
-        bool allowDefaultSessionFallback = false)
+        bool allowDefaultSessionFallback = false,
+        ISessionMap? sessionMap = null)
     {
         _clientId = clientId;
         _authorizationEndpoint = authorizationEndpoint;
@@ -61,6 +65,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         _authorizationUrlEmitter = authorizationUrlEmitter;
         _stateSecret = stateSecret ?? "A_VERY_LONG_AND_SECURE_SECRET_KEY_FOR_HMAC_SIGNING";
         _allowDefaultSessionFallback = allowDefaultSessionFallback;
+        _sessionMap = sessionMap;
     }
 
     public virtual string BuildAuthorizationUrl(string sessionId)
@@ -103,14 +108,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
 
         if (string.IsNullOrEmpty(sessionId))
         {
-            if (_allowDefaultSessionFallback)
-            {
-                sessionId = Constants.DefaultSessionId;
-            }
-            else
-            {
-                throw new InvalidOperationException("SessionId not set in MCP context and default fallback is disabled for this transport. Cannot apply authentication.");
-            }
+            throw new InvalidOperationException("SessionId not set in MCP context. Cannot apply authentication.");
         }
 
         var tokenData = await _secureTokenStore.GetTokenAsync(sessionId, _oauthProviderName, cancellationToken);
@@ -143,30 +141,82 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
     public virtual async Task<TokenData> HandleAuthorizationCallbackAsync(string code, string stateParam, CancellationToken cancellationToken = default)
     {
         var oauthState = ValidateAndExtractSignedState(stateParam);
-        var sessionId = oauthState.SessionId!;
+        var sessionHandle = oauthState.SessionId!;
         var nonce = oauthState.Nonce!;
         var redirectUri = oauthState.RedirectUri!;
 
-        _mcpContextAccessor.SessionId = sessionId; 
+        // Default to using the handle as the storage key
+        var storageKey = sessionHandle;
 
         string? codeVerifier = null;
         if (_usePkce)
         {
-            var pkceTokenData = await _secureTokenStore.GetTokenAsync(sessionId, _pkceStorePrefix + nonce, cancellationToken)
-                ?? throw new InvalidOperationException($"PKCE verifier not found for session '{sessionId}' and nonce '{nonce}'. Login process invalid or expired.");
+            // PKCE verifier was stored under the session HANDLE (Temp ID)
+            var pkceTokenData = await _secureTokenStore.GetTokenAsync(sessionHandle, _pkceStorePrefix + nonce, cancellationToken)
+                ?? throw new InvalidOperationException($"PKCE verifier not found for session '{sessionHandle}' and nonce '{nonce}'. Login process invalid or expired.");
             codeVerifier = pkceTokenData.AccessToken;
         }
 
         var tokenData = await ExchangeCodeForTokenAsync(code, redirectUri, codeVerifier, cancellationToken);
+
+        // Session Upgrade Logic:
+        // If we have an ID Token, try to extract the user's stable identity (sub/email).
+        var idToken = ExtractIdToken(tokenData);
+        if (!string.IsNullOrEmpty(idToken))
+        {
+            var principalId = ExtractPrincipalFromIdToken(idToken);
+            if (!string.IsNullOrEmpty(principalId) && _sessionMap != null)
+            {
+                // Upgrade the session mapping: sessionHandle points to principalId
+                _sessionMap.UpgradeSession(sessionHandle, principalId);
+                // Future storage should use the principalId
+                storageKey = principalId;
+                // Update the current context to reflect the change immediately
+                _mcpContextAccessor.SessionId = principalId;
+            }
+        }
+        else
+        {
+            // Ensure context is set to the handle if no upgrade happened
+             _mcpContextAccessor.SessionId = sessionHandle;
+        }
         
-        await _secureTokenStore.SaveTokenAsync(sessionId, _oauthProviderName, tokenData, cancellationToken);
+        await _secureTokenStore.SaveTokenAsync(storageKey, _oauthProviderName, tokenData, cancellationToken);
 
         if (_usePkce)
         {
-            await _secureTokenStore.DeleteTokenAsync(sessionId, _pkceStorePrefix + nonce, cancellationToken);
+            await _secureTokenStore.DeleteTokenAsync(sessionHandle, _pkceStorePrefix + nonce, cancellationToken);
         }
 
         return tokenData;
+    }
+
+    private string? ExtractIdToken(TokenData tokenData)
+    {
+        return tokenData.IdToken;
+    }
+
+    private string? ExtractPrincipalFromIdToken(string idToken)
+    {
+        try
+        {
+            var parts = idToken.Split('.');
+            if (parts.Length < 2) return null;
+            
+            var payload = parts[1];
+            var jsonBytes = Base64UrlDecode(payload);
+            using var doc = JsonDocument.Parse(jsonBytes);
+            
+            if (doc.RootElement.TryGetProperty("sub", out var sub))
+            {
+                return sub.GetString();
+            }
+        }
+        catch 
+        { 
+            // Ignore parsing failures
+        }
+        return null;
     }
 
     private async Task<TokenData> ExchangeCodeForTokenAsync(string code, string redirectUri, string? codeVerifier, CancellationToken cancellationToken)
@@ -202,12 +252,13 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
             ?? throw new Exception("No access_token in response");
         
         var refreshToken = root.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
+        var idToken = root.TryGetProperty("id_token", out var it) ? it.GetString() : null;
         
         var expiresAt = root.TryGetProperty("expires_in", out var exp) 
             ? (DateTimeOffset?)DateTimeOffset.UtcNow.AddSeconds(exp.GetInt32()) 
             : null;
 
-        return new TokenData(accessToken, refreshToken, expiresAt);
+        return new TokenData(accessToken, refreshToken, expiresAt, idToken);
     }
 
     private async Task<TokenData> RefreshTokenAsync(string refreshToken, string sessionId, CancellationToken cancellationToken)
@@ -237,12 +288,13 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
             ?? throw new Exception("No access_token in response");
 
         var newRefreshToken = root.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null;
+        var idToken = root.TryGetProperty("id_token", out var it) ? it.GetString() : null;
 
         var expiresAt = root.TryGetProperty("expires_in", out var exp) 
             ? (DateTimeOffset?)DateTimeOffset.UtcNow.AddSeconds(exp.GetInt32()) 
             : null;
 
-        return new TokenData(accessToken, newRefreshToken, expiresAt);
+        return new TokenData(accessToken, newRefreshToken, expiresAt, idToken);
     }
 
 
