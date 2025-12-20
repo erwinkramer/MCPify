@@ -3,7 +3,6 @@ using System.Threading.Tasks;
 
 namespace MCPify.Core;
 
-// Define the interface
 public interface IMcpContextAccessor
 {
     string? SessionId { get; set; }
@@ -11,7 +10,6 @@ public interface IMcpContextAccessor
     string? AccessToken { get; set; }
 }
 
-// Implement the class
 public class McpContextAccessor : IMcpContextAccessor
 {
     private static readonly System.Threading.AsyncLocal<McpContextHolder> _mcpContextCurrent = new System.Threading.AsyncLocal<McpContextHolder>();
@@ -84,7 +82,6 @@ public class McpContextAccessor : IMcpContextAccessor
         }
     }
 
-    // Fix for CS0053: Make McpContext internal
     public class McpContext
     {
         public string? SessionId { get; set; }

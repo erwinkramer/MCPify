@@ -62,43 +62,60 @@ public class OpenApiProxyTool : McpServerTool
         RequestContext<CallToolRequestParams> context,
         CancellationToken token)
     {
-        var argsDict = context.Params?.Arguments != null
-            ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(context.Params.Arguments))
-            : new Dictionary<string, JsonElement>();
-
-        var request = BuildHttpRequest(argsDict);
-
-        if (_authenticationFactory != null)
+        var logger = context.Services != null ? context.Services.GetService<Microsoft.Extensions.Logging.ILogger<OpenApiProxyTool>>() : null;
+        
+        try
         {
-            var authentication = _authenticationFactory.Invoke(context.Services!);
-            await authentication.ApplyAsync(request, token);
-        }
+            var argsDict = context.Params?.Arguments != null
+                ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(context.Params.Arguments))
+                : new Dictionary<string, JsonElement>();
 
-        var response = await _http.SendAsync(request, token);
+            var request = BuildHttpRequest(argsDict);
+            logger?.LogInformation("Invoking {Method} {Url}", request.Method, request.RequestUri);
 
-        var content = await response.Content.ReadAsStringAsync(token);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var errorContent = JsonSerializer.Serialize(new
+            if (_authenticationFactory != null)
             {
-                error = true,
-                statusCode = (int)response.StatusCode,
-                status = response.StatusCode.ToString(),
-                message = content
-            });
+                var authentication = _authenticationFactory.Invoke(context.Services!);
+                await authentication.ApplyAsync(request, token);
+            }
 
+            var response = await _http.SendAsync(request, token);
+            var content = await response.Content.ReadAsStringAsync(token);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                logger?.LogWarning("API call failed: {StatusCode} {Reason}. Response: {Content}", response.StatusCode, response.ReasonPhrase, content);
+
+                var errorContent = JsonSerializer.Serialize(new
+                {
+                    error = true,
+                    statusCode = (int)response.StatusCode,
+                    status = response.StatusCode.ToString(),
+                    message = content
+                });
+
+                return new CallToolResult
+                {
+                    Content = new[] { new TextContentBlock { Text = errorContent } },
+                    IsError = true
+                };
+            }
+
+            logger?.LogInformation("API call successful: {StatusCode}", response.StatusCode);
             return new CallToolResult
             {
-                Content = new[] { new TextContentBlock { Text = errorContent } },
+                Content = new[] { new TextContentBlock { Text = content } }
+            };
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex, "Error invoking OpenApiProxyTool for {ToolName}", ProtocolTool.Name);
+            return new CallToolResult
+            {
+                Content = new[] { new TextContentBlock { Text = $"Internal Error: {ex.Message}" } },
                 IsError = true
             };
         }
-
-        return new CallToolResult
-        {
-            Content = new[] { new TextContentBlock { Text = content } }
-        };
     }
 
     private JsonElement BuildInputSchema()

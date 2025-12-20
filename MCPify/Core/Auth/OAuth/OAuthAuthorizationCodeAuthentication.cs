@@ -63,7 +63,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         _allowDefaultSessionFallback = allowDefaultSessionFallback;
     }
 
-    public string BuildAuthorizationUrl(string sessionId)
+    public virtual string BuildAuthorizationUrl(string sessionId)
     {
         var redirectUri = _redirectUri ?? throw new InvalidOperationException("redirectUri must be configured for auth URL generation.");
 
@@ -91,7 +91,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         return $"{_authorizationEndpoint}?{query}";
     }
 
-    public async Task ApplyAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
+    public virtual async Task ApplyAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
     {
         if (!string.IsNullOrEmpty(_mcpContextAccessor.AccessToken))
         {
@@ -140,7 +140,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         throw new InvalidOperationException($"No valid token found or refresh failed for session '{sessionId}'. Run the login tool to authenticate first.");
     }
 
-    public async Task<TokenData> HandleAuthorizationCallbackAsync(string code, string stateParam, CancellationToken cancellationToken = default)
+    public virtual async Task<TokenData> HandleAuthorizationCallbackAsync(string code, string stateParam, CancellationToken cancellationToken = default)
     {
         var oauthState = ValidateAndExtractSignedState(stateParam);
         var sessionId = oauthState.SessionId!;

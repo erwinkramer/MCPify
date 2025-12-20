@@ -15,6 +15,12 @@ namespace MCPify.Hosting;
 
 public static class McpifyServiceExtensions
 {
+    /// <summary>
+    /// Adds MCPify services to the service collection with custom configuration.
+    /// </summary>
+    /// <param name="services">The <see cref="IServiceCollection"/> to add services to.</param>
+    /// <param name="configure">A delegate to configure the <see cref="McpifyOptions"/>.</param>
+    /// <returns>The <see cref="IServiceCollection"/> so that additional calls can be chained.</returns>
     public static IServiceCollection AddMcpify(
         this IServiceCollection services,
         Action<McpifyOptions> configure)
@@ -46,7 +52,10 @@ public static class McpifyServiceExtensions
                 {
                     foreach (var tool in options.ToolCollection)
                     {
-                        sharedCollection.Add(tool);
+                        if (!sharedCollection.Any(t => t.ProtocolTool.Name.Equals(tool.ProtocolTool.Name, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            sharedCollection.Add(tool);
+                        }
                     }
                 }
 
@@ -83,6 +92,14 @@ public static class McpifyServiceExtensions
         return services;
     }
 
+    /// <summary>
+    /// Adds MCPify services with simplified configuration for a single external API.
+    /// </summary>
+    /// <param name="services">The <see cref="IServiceCollection"/> to add services to.</param>
+    /// <param name="swaggerUrl">The URL of the Swagger/OpenAPI specification.</param>
+    /// <param name="apiBaseUrl">The base URL of the API.</param>
+    /// <param name="configure">Optional delegate to further configure <see cref="McpifyOptions"/>.</param>
+    /// <returns>The <see cref="IServiceCollection"/> so that additional calls can be chained.</returns>
     public static IServiceCollection AddMcpify(
         this IServiceCollection services,
         string swaggerUrl,
@@ -102,18 +119,32 @@ public static class McpifyServiceExtensions
         });
     }
 
+    /// <summary>
+    /// Adds a simple math tool for testing purposes.
+    /// </summary>
+    /// <param name="services">The <see cref="IServiceCollection"/> to add services to.</param>
+    /// <returns>The <see cref="IServiceCollection"/> so that additional calls can be chained.</returns>
     public static IServiceCollection AddMcpifyTestTool(this IServiceCollection services)
     {
         services.AddSingleton<McpServerTool, SimpleMathTool>();
         return services;
     }
 
-    // New extension method for adding McpContextMiddleware
+    /// <summary>
+    /// Adds the MCP context middleware to the pipeline. This is required for accessing session and connection information.
+    /// </summary>
+    /// <param name="builder">The <see cref="IApplicationBuilder"/> instance.</param>
+    /// <returns>The <see cref="IApplicationBuilder"/> instance.</returns>
     public static IApplicationBuilder UseMcpifyContext(this IApplicationBuilder builder)
     {
         return builder.UseMiddleware<McpContextMiddleware>();
     }
 
+    /// <summary>
+    /// Adds the MCP OAuth authentication middleware to the pipeline. This handles token validation and challenges for protected endpoints.
+    /// </summary>
+    /// <param name="builder">The <see cref="IApplicationBuilder"/> instance.</param>
+    /// <returns>The <see cref="IApplicationBuilder"/> instance.</returns>
     public static IApplicationBuilder UseMcpifyOAuth(this IApplicationBuilder builder)
     {
         return builder.UseMiddleware<McpOAuthAuthenticationMiddleware>();

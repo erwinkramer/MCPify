@@ -47,8 +47,25 @@ public class McpifyServiceRegistrar
 
     public async Task RegisterToolsAsync(IEnumerable<EndpointDataSource>? endpointDataSources = null)
     {
+        // 1. Register manual tools from DI
+        var toolCollection = _serviceProvider.GetService<McpServerPrimitiveCollection<McpServerTool>>();
+        if (toolCollection != null)
+        {
+            var manualTools = _serviceProvider.GetServices<McpServerTool>();
+            foreach (var tool in manualTools)
+            {
+                if (!toolCollection.Any(t => t.ProtocolTool.Name.Equals(tool.ProtocolTool.Name, StringComparison.OrdinalIgnoreCase)))
+                {
+                    toolCollection.Add(tool);
+                    _logger.LogDebug("[MCPify] Registered manual tool: {ToolName}", tool.ProtocolTool.Name);
+                }
+            }
+        }
+
+        // 2. Register external APIs
         await RegisterExternalEndpointsAsync();
 
+        // 3. Register local endpoints
         if (_options.LocalEndpoints?.Enabled == true)
         {
             try

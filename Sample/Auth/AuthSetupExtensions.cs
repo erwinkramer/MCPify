@@ -50,7 +50,21 @@ public static class AuthSetupExtensions
                 {
                     // The HandleAuthorizationCallbackAsync now takes the signed state and extracts sessionId
                     await auth.HandleAuthorizationCallbackAsync(code, state, context.RequestAborted);
-                    await context.Response.WriteAsync("Login complete. You can close this window and return to your MCP client.");
+                    
+                    context.Response.ContentType = "text/html";
+                    await context.Response.WriteAsync("""
+                        <html>
+                        <head><title>Login Successful</title></head>
+                        <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
+                            <h1 style="color: green;">Login Successful!</h1>
+                            <p>You have successfully authenticated with MCPify.</p>
+                            <p>You can now close this window and return to your application.</p>
+                            <script>
+                                setTimeout(function() { window.close(); }, 3000);
+                            </script>
+                        </body>
+                        </html>
+                        """);
                 }
                 catch (Exception ex)
                 {
