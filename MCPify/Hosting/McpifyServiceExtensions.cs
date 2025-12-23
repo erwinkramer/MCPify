@@ -104,13 +104,13 @@ public static class McpifyServiceExtensions
     /// Adds MCPify services with simplified configuration for a single external API.
     /// </summary>
     /// <param name="services">The <see cref="IServiceCollection"/> to add services to.</param>
-    /// <param name="swaggerUrl">The URL of the Swagger/OpenAPI specification.</param>
+    /// <param name="openApiUrl">The URL of the Swagger/OpenAPI specification.</param>
     /// <param name="apiBaseUrl">The base URL of the API.</param>
     /// <param name="configure">Optional delegate to further configure <see cref="McpifyOptions"/>.</param>
     /// <returns>The <see cref="IServiceCollection"/> so that additional calls can be chained.</returns>
     public static IServiceCollection AddMcpify(
         this IServiceCollection services,
-        string swaggerUrl,
+        string openApiUrl,
         string apiBaseUrl,
         Action<McpifyOptions>? configure = null)
     {
@@ -120,7 +120,7 @@ public static class McpifyServiceExtensions
 
             options.ExternalApis.Add(new ExternalApiOptions
             {
-                SwaggerUrl = swaggerUrl,
+                OpenApiUrl = openApiUrl,
                 ApiBaseUrl = apiBaseUrl,
                 ToolPrefix = options.ExternalApis.Count == 0 ? null : $"api{options.ExternalApis.Count}_",
             });

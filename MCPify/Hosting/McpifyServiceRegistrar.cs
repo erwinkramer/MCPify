@@ -94,10 +94,10 @@ public class McpifyServiceRegistrar
 
         foreach (var apiOptions in _options.ExternalApis)
         {
-            var source = apiOptions.SwaggerFilePath ?? apiOptions.SwaggerUrl;
+            var source = apiOptions.OpenApiFilePath ?? apiOptions.OpenApiUrl;
             if (string.IsNullOrEmpty(source))
             {
-                _logger.LogWarning("[MCPify] ExternalApiOptions requires either SwaggerUrl or SwaggerFilePath");
+                _logger.LogWarning("[MCPify] ExternalApiOptions requires either OpenApiUrl or OpenApiFilePath");
                 continue;
             }
 

@@ -111,12 +111,12 @@ public class ExternalApiOptions
     /// <summary>
     /// The URL of the OpenAPI/Swagger JSON specification.
     /// </summary>
-    public string? SwaggerUrl { get; set; }
+    public string? OpenApiUrl { get; set; }
 
     /// <summary>
     /// The local file path to the OpenAPI/Swagger JSON specification.
     /// </summary>
-    public string? SwaggerFilePath { get; set; }
+    public string? OpenApiFilePath { get; set; }
 
     /// <summary>
     /// The base URL of the API to invoke.

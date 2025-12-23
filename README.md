@@ -53,7 +53,7 @@ builder.Services.AddMcpify(options =>
     options.ExternalApis.Add(new ExternalApiOptions
     {
         ApiBaseUrl = "https://petstore.swagger.io/v2",
-        SwaggerUrl = "https://petstore.swagger.io/v2/swagger.json",
+        OpenApiUrl = "https://petstore.swagger.io/v2/swagger.json",
         ToolPrefix = "petstore_"
     });
 });

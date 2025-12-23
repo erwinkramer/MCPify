@@ -158,7 +158,7 @@ public static class DemoServiceExtensions
             options.ExternalApis.Add(new ExternalApiOptions
             {
                 ApiBaseUrl = "https://petstore.swagger.io/v2",
-                SwaggerUrl = "https://petstore.swagger.io/v2/swagger.json",
+                OpenApiUrl = "https://petstore.swagger.io/v2/swagger.json",
                 ToolPrefix = "petstore_"
             });
 
@@ -166,7 +166,7 @@ public static class DemoServiceExtensions
             options.ExternalApis.Add(new ExternalApiOptions
             {
                 ApiBaseUrl = baseUrl, // Point back to self for demo
-                SwaggerFilePath = "sample-api.json",
+                OpenApiFilePath = "sample-api.json",
                 ToolPrefix = "localfile_"
             });
         });
