@@ -12,7 +12,7 @@ This sample demonstrates how to use **MCPify** to expose ASP.NET Core endpoints 
 
 ## Prerequisites
 
--   .NET 9.0 SDK
+-   .NET 8.0, 9.0, or 10.0 SDK
 
 ## Getting Started
 
@@ -21,9 +21,9 @@ This sample demonstrates how to use **MCPify** to expose ASP.NET Core endpoints 
 The default configuration uses `Stdio` transport, which is designed for local tools.
 
 1.  **Publish the Project:**
-    Build the project in Release mode to create the executable DLL.
+    Build the project in Release mode to create the executable DLL (replace `<tfm>` with `net8.0`, `net9.0`, or `net10.0`).
     ```bash
-    dotnet publish Sample/MCPify.Sample.csproj -c Release
+    dotnet publish Sample/MCPify.Sample.csproj -c Release -f <tfm>
     ```
 
 2.  **Configure Claude Desktop:**
@@ -35,7 +35,7 @@ The default configuration uses `Stdio` transport, which is designed for local to
         "mcpify-sample": {
           "command": "dotnet",
           "args": [
-            "<abs-path-to-repo>/Sample/bin/Release/net9.0/publish/MCPify.Sample.dll"
+            "<abs-path-to-repo>/Sample/bin/Release/<tfm>/publish/MCPify.Sample.dll"
           ]
         }
       }
@@ -54,7 +54,7 @@ To run the server in HTTP mode (using Server-Sent Events):
 1.  **Run with HTTP Flag:**
     ```bash
     cd Sample
-    dotnet run --Mcpify:Transport=Http
+    dotnet run -f <tfm> -- --Mcpify:Transport=Http
     ```
 
 2.  **Endpoints:**
@@ -133,7 +133,7 @@ These can be configured in `appsettings.json` or via command-line arguments.
 ## Troubleshooting
 
 -   **"Waiting for server to respond to initialize request..."**: This usually means you are using `dotnet run` in your MCP client configuration (e.g., VSCode/Claude). `dotnet run` emits build logs ("Building...", "Now listening...") to standard output, which corrupts the JSON-RPC protocol used by Stdio transport.
-    -   **Fix:** Point your client command to the **published DLL** (e.g., `dotnet Slampe/bin/Release/net9.0/publish/MCPify.Sample.dll`) instead of using `dotnet run`. Ensure you have published the project first (`dotnet publish -c Release`).
+    -   **Fix:** Point your client command to the **published DLL** (e.g., `dotnet Slampe/bin/Release/<tfm>/publish/MCPify.Sample.dll`) instead of using `dotnet run`. Ensure you have published the project first (`dotnet publish -c Release -f <tfm>`).
 
 -   **Stdio Issues:** If connecting via Stdio fails, ensure no other output is being written to the console. The application automatically disables logging in Stdio mode to prevent this.
 -   **Logs:** In Stdio mode, standard logs are suppressed. You can configure file-based logging if debugging is needed.

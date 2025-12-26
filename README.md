@@ -13,6 +13,10 @@
 -   **Dual Transport**: Supports both `Stdio` (for local desktop apps like Claude) and `Http` (SSE) transports.
 -   **Production Ready**: Robust logging, error handling, and configurable options.
 
+## Supported Frameworks
+
+-   .NET 8, .NET 9, .NET 10
+
 ## Quick Start
 
 ### 1. Installation
