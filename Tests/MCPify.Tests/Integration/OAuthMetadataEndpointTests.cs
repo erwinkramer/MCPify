@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Linq;
 using MCPify.Core;
 using MCPify.Core.Auth;
 using MCPify.Hosting;
@@ -31,7 +32,11 @@ public class OAuthMetadataEndpointTests
     {
         var authUrl = "https://auth.example.com/authorize";
         var tokenUrl = "https://auth.example.com/token";
-        var authorizationServer = "https://auth.example.com/login/oauth";
+        var authorizationServers = new[]
+        {
+            "https://auth.example.com/login/oauth",
+            "https://auth-backup.example.com/login/oauth"
+        };
 
         using var host = await CreateHostAsync(services =>
         {
@@ -40,7 +45,7 @@ public class OAuthMetadataEndpointTests
             {
                 AuthorizationUrl = authUrl,
                 TokenUrl = tokenUrl,
-                AuthorizationServer = authorizationServer,
+                AuthorizationServers = authorizationServers.ToList(),
                 Scopes = new Dictionary<string, string> { { "scope1", "desc" } }
             });
         });
@@ -52,7 +57,7 @@ public class OAuthMetadataEndpointTests
 
         var metadata = await response.Content.ReadFromJsonAsync<ProtectedResourceMetadata>();
         Assert.NotNull(metadata);
-        Assert.Contains(authorizationServer, metadata!.AuthorizationServers);
+        Assert.Equal(authorizationServers.OrderBy(server => server), metadata!.AuthorizationServers.OrderBy(server => server));
         Assert.Contains("scope1", metadata.ScopesSupported);
     }
 

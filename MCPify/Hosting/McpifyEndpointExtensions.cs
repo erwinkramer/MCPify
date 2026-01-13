@@ -1,18 +1,11 @@
 using MCPify.Core;
 using MCPify.Core.Auth;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using MCPify.Endpoints;
 using MCPify.Tools;
 using MCPify.Schema;
-using System.Net.Http;
-using Microsoft.AspNetCore.Http;
-using System;
 
 namespace MCPify.Hosting;
 
@@ -134,24 +127,27 @@ public static class McpifyEndpointExtensions
 
             resourceUrl = (string.IsNullOrWhiteSpace(resourceUrl) ? Constants.DefaultBaseUrl : resourceUrl).TrimEnd('/');
 
+            static IEnumerable<string> ResolveAuthorizationServers(OAuth2Configuration config)
+            {
+                if (config.AuthorizationServers.Count > 0)
+                {
+                    foreach (var server in config.AuthorizationServers)
+                    {
+                        yield return server;
+                    }
+
+                    yield break;
+                }
+
+                if (Uri.TryCreate(config.AuthorizationUrl, UriKind.Absolute, out var uri))
+                {
+                    yield return uri.GetLeftPart(UriPartial.Authority);
+                }
+            }
+
             // Prefer explicitly configured authorization servers, fall back to derived authorities.
             var issuers = configs
-                .Select(c =>
-                {
-                    if (!string.IsNullOrWhiteSpace(c.AuthorizationServer))
-                    {
-                        return c.AuthorizationServer;
-                    }
-
-                    if (Uri.TryCreate(c.AuthorizationUrl, UriKind.Absolute, out var uri))
-                    {
-                        return uri.GetLeftPart(UriPartial.Authority);
-                    }
-
-                    return null;
-                })
-                .Where(x => !string.IsNullOrWhiteSpace(x))
-                .Select(x => x!.Trim())
+                .SelectMany(ResolveAuthorizationServers)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 

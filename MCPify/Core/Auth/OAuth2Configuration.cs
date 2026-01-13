@@ -2,7 +2,7 @@ namespace MCPify.Core.Auth;
 
 public class OAuth2Configuration
 {
-    public string? AuthorizationServer { get; set; }
+    public List<string> AuthorizationServers { get; set; } = [];
     public string AuthorizationUrl { get; set; } = string.Empty;
     public string FlowType { get; set; } = string.Empty;
     public string? RefreshUrl { get; set; }
