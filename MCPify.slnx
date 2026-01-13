@@ -4,11 +4,7 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Folder Name="/Sample/">
-    <Project Path="Sample/MCPify.Sample.csproj" />
-  </Folder>
-  <Folder Name="/Tests/">
-    <Project Path="Tests/MCPify.Tests/MCPify.Tests.csproj" />
-  </Folder>
   <Project Path="MCPify/MCPify.csproj" />
+  <Project Path="Sample/MCPify.Sample.csproj" />
+  <Project Path="Tests/MCPify.Tests/MCPify.Tests.csproj" />
 </Solution>
