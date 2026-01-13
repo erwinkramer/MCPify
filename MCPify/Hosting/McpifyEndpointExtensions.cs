@@ -121,7 +121,18 @@ public static class McpifyEndpointExtensions
             }
 
             var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
-            var resourceUrl = opts.LocalEndpoints?.BaseUrlOverride ?? addresses?.FirstOrDefault() ?? Constants.DefaultBaseUrl;
+            var resourceUrl = opts.ResourceUrlOverride;
+            if (string.IsNullOrWhiteSpace(resourceUrl))
+            {
+                resourceUrl = opts.LocalEndpoints?.BaseUrlOverride;
+            }
+
+            if (string.IsNullOrWhiteSpace(resourceUrl))
+            {
+                resourceUrl = addresses?.FirstOrDefault();
+            }
+
+            resourceUrl = (string.IsNullOrWhiteSpace(resourceUrl) ? Constants.DefaultBaseUrl : resourceUrl).TrimEnd('/');
 
             // Prefer explicitly configured authorization servers, fall back to derived authorities.
             var issuers = configs

@@ -141,6 +141,7 @@ public static class DemoServiceExtensions
         services.AddMcpify(options =>
         {
             options.Transport = transport;
+            options.ResourceUrlOverride = baseUrl;
 
             // Expose the local API (which is now the "Real" API)
             options.LocalEndpoints = new()

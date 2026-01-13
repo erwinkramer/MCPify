@@ -46,10 +46,15 @@ public class McpOAuthAuthenticationMiddleware
         if (string.IsNullOrEmpty(authorization) || !authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
             // Challenge
-            var resourceUrl = $"{context.Request.Scheme}://{context.Request.Host}";
-            if (options?.LocalEndpoints?.BaseUrlOverride != null)
+            var resourceUrl = options?.ResourceUrlOverride;
+            if (string.IsNullOrWhiteSpace(resourceUrl))
             {
-                resourceUrl = options.LocalEndpoints.BaseUrlOverride;
+                resourceUrl = options?.LocalEndpoints?.BaseUrlOverride;
+            }
+
+            if (string.IsNullOrWhiteSpace(resourceUrl))
+            {
+                resourceUrl = $"{context.Request.Scheme}://{context.Request.Host}";
             }
 
             // Ensure resourceUrl does not end with slash for concatenation consistency, though URLs handle it.

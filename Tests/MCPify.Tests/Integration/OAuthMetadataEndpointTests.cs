@@ -57,6 +57,34 @@ public class OAuthMetadataEndpointTests
     }
 
     [Fact]
+    public async Task GetMetadata_UsesResourceOverride_WhenConfigured()
+    {
+        var publicUrl = "https://public.example.com";
+
+        using var host = await CreateHostAsync(services =>
+        {
+            var store = services.GetRequiredService<OAuthConfigurationStore>();
+            store.AddConfiguration(new OAuth2Configuration
+            {
+                AuthorizationUrl = "https://auth.example.com/oauth2/v2.0/authorize",
+                TokenUrl = "https://auth.example.com/oauth2/v2.0/token"
+            });
+        }, options =>
+        {
+            options.ResourceUrlOverride = publicUrl;
+        });
+
+        var client = host.GetTestClient();
+
+        var response = await client.GetAsync("/.well-known/oauth-protected-resource");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var metadata = await response.Content.ReadFromJsonAsync<ProtectedResourceMetadata>();
+        Assert.NotNull(metadata);
+        Assert.Equal(publicUrl, metadata!.Resource);
+    }
+
+    [Fact]
     public async Task GetMetadata_FallsBackToAuthorizationUrlAuthority_WhenAuthorizationServerMissing()
     {
         var authUrl = "https://auth.example.com/oauth2/v2.0/authorize";
@@ -80,7 +108,7 @@ public class OAuthMetadataEndpointTests
         Assert.Contains("https://auth.example.com", metadata!.AuthorizationServers);
     }
 
-    private async Task<IHost> CreateHostAsync(Action<IServiceProvider>? configure = null)
+    private async Task<IHost> CreateHostAsync(Action<IServiceProvider>? configure = null, Action<McpifyOptions>? configureOptions = null)
     {
         return await new HostBuilder()
             .ConfigureWebHost(webBuilder =>
@@ -89,7 +117,10 @@ public class OAuthMetadataEndpointTests
                     .UseTestServer()
                     .ConfigureServices(services =>
                     {
-                        services.AddMcpify(options => { });
+                        services.AddMcpify(options =>
+                        {
+                            configureOptions?.Invoke(options);
+                        });
                         services.AddLogging();
                         services.AddRouting();
                     })
