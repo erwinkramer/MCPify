@@ -31,6 +31,7 @@ public class OAuthMetadataEndpointTests
     {
         var authUrl = "https://auth.example.com/authorize";
         var tokenUrl = "https://auth.example.com/token";
+        var authorizationServer = "https://auth.example.com/login/oauth";
 
         using var host = await CreateHostAsync(services =>
         {
@@ -39,6 +40,7 @@ public class OAuthMetadataEndpointTests
             {
                 AuthorizationUrl = authUrl,
                 TokenUrl = tokenUrl,
+                AuthorizationServer = authorizationServer,
                 Scopes = new Dictionary<string, string> { { "scope1", "desc" } }
             });
         });
@@ -50,8 +52,32 @@ public class OAuthMetadataEndpointTests
 
         var metadata = await response.Content.ReadFromJsonAsync<ProtectedResourceMetadata>();
         Assert.NotNull(metadata);
-        Assert.Contains("https://auth.example.com", metadata!.AuthorizationServers);
+        Assert.Contains(authorizationServer, metadata!.AuthorizationServers);
         Assert.Contains("scope1", metadata.ScopesSupported);
+    }
+
+    [Fact]
+    public async Task GetMetadata_FallsBackToAuthorizationUrlAuthority_WhenAuthorizationServerMissing()
+    {
+        var authUrl = "https://auth.example.com/oauth2/v2.0/authorize";
+
+        using var host = await CreateHostAsync(services =>
+        {
+            var store = services.GetRequiredService<OAuthConfigurationStore>();
+            store.AddConfiguration(new OAuth2Configuration
+            {
+                AuthorizationUrl = authUrl
+            });
+        });
+
+        var client = host.GetTestClient();
+
+        var response = await client.GetAsync("/.well-known/oauth-protected-resource");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var metadata = await response.Content.ReadFromJsonAsync<ProtectedResourceMetadata>();
+        Assert.NotNull(metadata);
+        Assert.Contains("https://auth.example.com", metadata!.AuthorizationServers);
     }
 
     private async Task<IHost> CreateHostAsync(Action<IServiceProvider>? configure = null)

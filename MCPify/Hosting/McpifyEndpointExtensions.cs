@@ -12,6 +12,7 @@ using MCPify.Tools;
 using MCPify.Schema;
 using System.Net.Http;
 using Microsoft.AspNetCore.Http;
+using System;
 
 namespace MCPify.Hosting;
 
@@ -122,18 +123,26 @@ public static class McpifyEndpointExtensions
             var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
             var resourceUrl = opts.LocalEndpoints?.BaseUrlOverride ?? addresses?.FirstOrDefault() ?? Constants.DefaultBaseUrl;
 
-            // Extract potential issuer URLs from AuthorizationUrl
-            var issuers = configs.Select(c => 
-            {
-                if (Uri.TryCreate(c.AuthorizationUrl, UriKind.Absolute, out var uri))
+            // Prefer explicitly configured authorization servers, fall back to derived authorities.
+            var issuers = configs
+                .Select(c =>
                 {
-                    return uri.GetLeftPart(UriPartial.Authority);
-                }
-                return null;
-            })
-            .Where(x => x != null)
-            .Distinct()
-            .ToList();
+                    if (!string.IsNullOrWhiteSpace(c.AuthorizationServer))
+                    {
+                        return c.AuthorizationServer;
+                    }
+
+                    if (Uri.TryCreate(c.AuthorizationUrl, UriKind.Absolute, out var uri))
+                    {
+                        return uri.GetLeftPart(UriPartial.Authority);
+                    }
+
+                    return null;
+                })
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             return Results.Ok(new
             {
