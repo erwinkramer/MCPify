@@ -29,7 +29,7 @@ public class OAuthMiddlewareTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Contains("WWW-Authenticate", response.Headers.ToDictionary(h => h.Key, h => string.Join(", ", h.Value)).Keys);
         var authHeader = response.Headers.WwwAuthenticate.ToString();
-        Assert.Contains("resource_metadata_url", authHeader);
+        Assert.Contains("resource_metadata", authHeader);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class OAuthMiddlewareTests
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         var authHeader = response.Headers.WwwAuthenticate.ToString();
         Assert.Contains($"resource=\"{publicUrl}\"", authHeader);
-        Assert.Contains($"resource_metadata_url=\"{publicUrl}/.well-known/oauth-protected-resource\"", authHeader);
+        Assert.Contains($"resource_metadata=\"{publicUrl}/.well-known/oauth-protected-resource\"", authHeader);
     }
 
     [Fact]
