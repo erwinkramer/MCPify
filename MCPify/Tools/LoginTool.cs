@@ -2,7 +2,6 @@ using MCPify.Core;
 using MCPify.Core.Auth;
 using MCPify.Core.Auth.OAuth;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using System.Diagnostics;
@@ -62,7 +61,7 @@ public class LoginTool : McpServerTool
 
         var auth = context.Services!.GetRequiredService<OAuthAuthorizationCodeAuthentication>();
         var tokenStore = context.Services!.GetRequiredService<ISecureTokenStore>();
-        var options = context.Services!.GetService<IOptions<McpifyOptions>>()?.Value ?? new McpifyOptions();
+        var options = context.Services!.GetService<McpifyOptions>() ?? new McpifyOptions();
 
         var authUrl = auth.BuildAuthorizationUrl(sessionId);
         var browserOpened = false;
