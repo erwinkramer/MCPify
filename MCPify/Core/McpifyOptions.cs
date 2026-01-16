@@ -56,6 +56,14 @@ public class McpifyOptions
     /// The transport mechanism to use for the MCP server. Defaults to HTTP.
     /// </summary>
     public McpTransportType Transport { get; set; } = McpTransportType.Http;
+
+    /// <summary>
+    /// Controls how the login tool handles browser launching for OAuth authentication.
+    /// Set to <see cref="BrowserLaunchBehavior.Never"/> for headless/remote environments to avoid
+    /// unnecessary timeouts waiting for browser launch to fail.
+    /// Defaults to <see cref="BrowserLaunchBehavior.Auto"/> which detects headless environments at runtime.
+    /// </summary>
+    public BrowserLaunchBehavior LoginBrowserBehavior { get; set; } = BrowserLaunchBehavior.Auto;
 }
 
 /// <summary>
@@ -71,6 +79,27 @@ public enum McpTransportType
     /// Uses Standard Input/Output (Stdio) for communication. Best for local integration with desktop apps (e.g. Claude).
     /// </summary>
     Stdio
+}
+
+/// <summary>
+/// Defines how the login tool should handle browser launching for OAuth flows.
+/// </summary>
+public enum BrowserLaunchBehavior
+{
+    /// <summary>
+    /// Automatically detect if browser launching is possible.
+    /// Skips browser launch in headless environments (no DISPLAY/WAYLAND on Linux, containers, SSH without X forwarding).
+    /// </summary>
+    Auto,
+    /// <summary>
+    /// Always attempt to open the browser, regardless of environment detection.
+    /// </summary>
+    Always,
+    /// <summary>
+    /// Never attempt to open the browser. Always return the URL directly for manual authentication.
+    /// This is ideal for headless servers, containers, and remote environments.
+    /// </summary>
+    Never
 }
 
 /// <summary>
