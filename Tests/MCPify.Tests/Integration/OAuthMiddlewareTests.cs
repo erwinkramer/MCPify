@@ -33,6 +33,30 @@ public class OAuthMiddlewareTests
     }
 
     [Fact]
+    public async Task Request_Challenge_UsesResourceOverride()
+    {
+        var publicUrl = "https://proxy.example.com";
+
+        using var host = await CreateHostAsync(services =>
+        {
+            var store = services.GetRequiredService<OAuthConfigurationStore>();
+            store.AddConfiguration(new OAuth2Configuration { AuthorizationUrl = "https://auth" });
+        }, options =>
+        {
+            options.ResourceUrlOverride = publicUrl;
+        });
+
+        var client = host.GetTestClient();
+
+        var response = await client.GetAsync("/mcp");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var authHeader = response.Headers.WwwAuthenticate.ToString();
+        Assert.Contains($"resource=\"{publicUrl}\"", authHeader);
+        Assert.Contains($"resource_metadata_url=\"{publicUrl}/.well-known/oauth-protected-resource\"", authHeader);
+    }
+
+    [Fact]
     public async Task Request_Returns200_WhenTokenPresent()
     {
         using var host = await CreateHostAsync(services =>
@@ -60,7 +84,7 @@ public class OAuthMiddlewareTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    private async Task<IHost> CreateHostAsync(Action<IServiceProvider>? configure = null)
+    private async Task<IHost> CreateHostAsync(Action<IServiceProvider>? configure = null, Action<McpifyOptions>? configureOptions = null)
     {
         return await new HostBuilder()
             .ConfigureWebHost(webBuilder =>
@@ -69,7 +93,10 @@ public class OAuthMiddlewareTests
                     .UseTestServer()
                     .ConfigureServices(services =>
                     {
-                        services.AddMcpify(options => { });
+                        services.AddMcpify(options =>
+                        {
+                            configureOptions?.Invoke(options);
+                        });
                         services.AddLogging();
                     })
                     .Configure(app =>

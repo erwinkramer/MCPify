@@ -1,17 +1,11 @@
 using MCPify.Core;
 using MCPify.Core.Auth;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using MCPify.Endpoints;
 using MCPify.Tools;
 using MCPify.Schema;
-using System.Net.Http;
-using Microsoft.AspNetCore.Http;
 
 namespace MCPify.Hosting;
 
@@ -120,20 +114,42 @@ public static class McpifyEndpointExtensions
             }
 
             var addresses = server.Features.Get<IServerAddressesFeature>()?.Addresses;
-            var resourceUrl = opts.LocalEndpoints?.BaseUrlOverride ?? addresses?.FirstOrDefault() ?? Constants.DefaultBaseUrl;
-
-            // Extract potential issuer URLs from AuthorizationUrl
-            var issuers = configs.Select(c => 
+            var resourceUrl = opts.ResourceUrlOverride;
+            if (string.IsNullOrWhiteSpace(resourceUrl))
             {
-                if (Uri.TryCreate(c.AuthorizationUrl, UriKind.Absolute, out var uri))
+                resourceUrl = opts.LocalEndpoints?.BaseUrlOverride;
+            }
+
+            if (string.IsNullOrWhiteSpace(resourceUrl))
+            {
+                resourceUrl = addresses?.FirstOrDefault();
+            }
+
+            resourceUrl = (string.IsNullOrWhiteSpace(resourceUrl) ? Constants.DefaultBaseUrl : resourceUrl).TrimEnd('/');
+
+            static IEnumerable<string> ResolveAuthorizationServers(OAuth2Configuration config)
+            {
+                if (config.AuthorizationServers.Count > 0)
                 {
-                    return uri.GetLeftPart(UriPartial.Authority);
+                    foreach (var server in config.AuthorizationServers)
+                    {
+                        yield return server;
+                    }
+
+                    yield break;
                 }
-                return null;
-            })
-            .Where(x => x != null)
-            .Distinct()
-            .ToList();
+
+                if (Uri.TryCreate(config.AuthorizationUrl, UriKind.Absolute, out var uri))
+                {
+                    yield return uri.GetLeftPart(UriPartial.Authority);
+                }
+            }
+
+            // Prefer explicitly configured authorization servers, fall back to derived authorities.
+            var issuers = configs
+                .SelectMany(ResolveAuthorizationServers)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
 
             return Results.Ok(new
             {

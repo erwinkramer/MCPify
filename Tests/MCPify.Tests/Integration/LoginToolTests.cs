@@ -44,21 +44,14 @@ public class LoginToolTests
     {
         // Arrange
         var services = new ServiceCollection();
-        
-        var mockTokenStoreArg = new Mock<ISecureTokenStore>();
-        var mockAccessorArg = new Mock<IMcpContextAccessor>();
-
-        var mockAuth = new Mock<OAuthAuthorizationCodeAuthentication>(
-            "client", "http://auth", "http://token", "scope", 
-            mockTokenStoreArg.Object, mockAccessorArg.Object,
-            null, null, "http://callback", null, false, null, null, false);
-            
-        mockAuth.Setup(x => x.BuildAuthorizationUrl(It.IsAny<string>()))
-                .Returns("http://auth/authorize?foo=bar");
 
         var tokenStore = new InMemoryTokenStore();
-        
-        services.AddSingleton(mockAuth.Object);
+        var accessor = new MockMcpContextAccessor { SessionId = "default" };
+        var auth = new StubOAuthAuthorization(tokenStore, accessor);
+
+        services.AddSingleton(accessor);
+        services.AddSingleton<IMcpContextAccessor>(accessor);
+        services.AddSingleton<OAuthAuthorizationCodeAuthentication>(auth);
         services.AddSingleton<ISecureTokenStore>(tokenStore);
         services.AddSingleton<LoginTool>();
 
@@ -90,20 +83,14 @@ public class LoginToolTests
     {
         // Arrange
         var services = new ServiceCollection();
-        var mockTokenStoreArg = new Mock<ISecureTokenStore>();
-        var mockAccessorArg = new Mock<IMcpContextAccessor>();
-
-        var mockAuth = new Mock<OAuthAuthorizationCodeAuthentication>(
-             "client", "http://auth", "http://token", "scope",
-             mockTokenStoreArg.Object, mockAccessorArg.Object,
-             null, null, "http://callback", null, false, null, null, false);
-
-        mockAuth.Setup(x => x.BuildAuthorizationUrl(It.IsAny<string>()))
-                .Returns("http://auth/authorize?foo=bar");
 
         var tokenStore = new InMemoryTokenStore();
+        var accessor = new MockMcpContextAccessor { SessionId = "default" };
+        var auth = new StubOAuthAuthorization(tokenStore, accessor);
 
-        services.AddSingleton(mockAuth.Object);
+        services.AddSingleton(accessor);
+        services.AddSingleton<IMcpContextAccessor>(accessor);
+        services.AddSingleton<OAuthAuthorizationCodeAuthentication>(auth);
         services.AddSingleton<ISecureTokenStore>(tokenStore);
         services.AddSingleton<LoginTool>();
 
@@ -127,4 +114,22 @@ public class LoginToolTests
         Assert.DoesNotContain("Login successful", textContent.Text);
         Assert.Contains("http://auth/authorize?foo=bar", textContent.Text);
     }
+
+        private sealed class StubOAuthAuthorization : OAuthAuthorizationCodeAuthentication
+        {
+            public StubOAuthAuthorization(ISecureTokenStore store, IMcpContextAccessor accessor)
+                : base(
+                    "client",
+                    "http://auth",
+                    "http://token",
+                    "scope",
+                    store,
+                    accessor,
+                    redirectUri: "http://callback",
+                    stateSecret: "test-secret")
+            {
+            }
+
+            public override string BuildAuthorizationUrl(string sessionId) => "http://auth/authorize?foo=bar";
+        }
 }

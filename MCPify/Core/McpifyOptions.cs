@@ -22,6 +22,12 @@ public class McpifyOptions
     public LocalEndpointsOptions? LocalEndpoints { get; set; }
 
     /// <summary>
+    /// Explicit URL advertised to MCP clients for OAuth resource metadata and challenges.
+    /// Allows publishing a proxy-facing URL that differs from the server's listen address.
+    /// </summary>
+    public string? ResourceUrlOverride { get; set; }
+
+    /// <summary>
     /// Configuration for importing external APIs via OpenAPI/Swagger as MCP tools.
     /// </summary>
     public List<ExternalApiOptions> ExternalApis { get; set; } = new();
