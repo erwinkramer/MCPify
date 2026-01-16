@@ -2,6 +2,7 @@ using MCPify.Core;
 using MCPify.Core.Auth;
 using MCPify.Core.Auth.OAuth;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 using System.Diagnostics;
@@ -19,7 +20,7 @@ public class LoginTool : McpServerTool
     public override Tool ProtocolTool => new()
     {
         Name = "login_auth_code_pkce",
-        Description = "Initiates the OAuth login flow. It attempts to open the system browser with the authorization URL and waits for the user to complete the login. Returns a success message once authenticated.",
+        Description = "Initiates the OAuth login flow. In interactive environments, attempts to open the system browser with the authorization URL and waits for the user to complete the login. In headless environments (detected automatically or configured via LoginBrowserBehavior option), returns the authorization URL immediately for manual authentication.",
         InputSchema = JsonDocument.Parse("""{ "type": "object", "properties": { "sessionId": { "type": "string" } } }""").RootElement
     };
 
@@ -61,19 +62,33 @@ public class LoginTool : McpServerTool
 
         var auth = context.Services!.GetRequiredService<OAuthAuthorizationCodeAuthentication>();
         var tokenStore = context.Services!.GetRequiredService<ISecureTokenStore>();
+        var options = context.Services!.GetService<IOptions<McpifyOptions>>()?.Value ?? new McpifyOptions();
 
         var authUrl = auth.BuildAuthorizationUrl(sessionId);
         var browserOpened = false;
 
-        try
+        // Determine whether to attempt browser launch based on configuration
+        if (ShouldOpenBrowser(options.LoginBrowserBehavior, logger))
         {
-            logger?.LogDebug("Attempting to open browser for URL: {AuthUrl}", authUrl);
-            OpenBrowser(authUrl);
-            browserOpened = true;
+            try
+            {
+                logger?.LogDebug("Attempting to open browser for URL: {AuthUrl}", authUrl);
+                OpenBrowser(authUrl);
+                browserOpened = true;
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Failed to open browser automatically.");
+            }
         }
-        catch (Exception ex)
+        else
         {
-            logger?.LogWarning(ex, "Failed to open browser automatically.");
+            logger?.LogInformation("Browser launch skipped (headless environment detected or disabled by configuration)");
+            // Return the URL immediately without waiting - no browser means no need to poll
+            return new CallToolResult
+            {
+                Content = new[] { new TextContentBlock { Text = $"Please open this URL to authenticate: {authUrl}" } }
+            };
         }
 
         var timeout = DateTime.UtcNow.AddMinutes(2);
@@ -101,7 +116,7 @@ public class LoginTool : McpServerTool
 
         logger?.LogInformation("Login timed out or was cancelled for session {SessionId}", sessionId);
 
-        var response = browserOpened 
+        var response = browserOpened
             ? $"Browser opened. Please complete the login there. If it didn't open, visit: {authUrl}"
             : $"Please open this URL to authenticate: {authUrl}";
 
@@ -132,6 +147,88 @@ public class LoginTool : McpServerTool
             {
                 Process.Start("open", url);
             }
+        }
+    }
+
+    /// <summary>
+    /// Determines whether the current environment supports browser launching.
+    /// Returns false for headless environments like containers, SSH sessions without X forwarding, etc.
+    /// </summary>
+    private static bool IsHeadlessEnvironment()
+    {
+        // Windows environments generally support browser launching
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            // Check for common container indicators on Windows
+            var isContainer = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("CONTAINER"))
+                || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("KUBERNETES_SERVICE_HOST"));
+            return isContainer;
+        }
+
+        // On Linux, check for display server availability
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            // Check for X11 or Wayland display
+            var hasDisplay = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY"))
+                || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WAYLAND_DISPLAY"));
+
+            if (!hasDisplay)
+            {
+                return true; // No display = headless
+            }
+
+            // Check for SSH session without proper X forwarding
+            var isSsh = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SSH_CONNECTION"))
+                || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SSH_CLIENT"));
+
+            if (isSsh && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DISPLAY")))
+            {
+                return true; // SSH without X forwarding
+            }
+
+            // Check for common container indicators
+            if (File.Exists("/.dockerenv") || File.Exists("/run/.containerenv"))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        // On macOS, check for SSH session or container
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            var isSsh = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SSH_CONNECTION"))
+                || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SSH_CLIENT"));
+
+            // SSH sessions on macOS can't open browser on the remote machine
+            return isSsh;
+        }
+
+        // Unknown platform - assume headless for safety
+        return true;
+    }
+
+    /// <summary>
+    /// Determines whether the browser should be opened based on the configured behavior.
+    /// </summary>
+    private static bool ShouldOpenBrowser(BrowserLaunchBehavior behavior, Microsoft.Extensions.Logging.ILogger? logger)
+    {
+        switch (behavior)
+        {
+            case BrowserLaunchBehavior.Always:
+                logger?.LogDebug("Browser launch behavior is set to Always - will attempt to open browser");
+                return true;
+
+            case BrowserLaunchBehavior.Never:
+                logger?.LogDebug("Browser launch behavior is set to Never - skipping browser launch");
+                return false;
+
+            case BrowserLaunchBehavior.Auto:
+            default:
+                var isHeadless = IsHeadlessEnvironment();
+                logger?.LogDebug("Browser launch behavior is Auto - headless detection: {IsHeadless}", isHeadless);
+                return !isHeadless;
         }
     }
 
