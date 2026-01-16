@@ -129,27 +129,29 @@ public static class McpifyEndpointExtensions
 
             static IEnumerable<string> ResolveAuthorizationServers(OAuth2Configuration config)
             {
-                if (config.AuthorizationServers.Count > 0)
-                {
-                    foreach (var server in config.AuthorizationServers)
-                    {
-                        yield return server;
-                    }
-
-                    yield break;
-                }
-
                 if (Uri.TryCreate(config.AuthorizationUrl, UriKind.Absolute, out var uri))
                 {
                     yield return uri.GetLeftPart(UriPartial.Authority);
                 }
             }
 
-            // Prefer explicitly configured authorization servers, fall back to derived authorities.
-            var issuers = configs
-                .SelectMany(ResolveAuthorizationServers)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            // If any config has AuthorizationServers, only use those; otherwise, fall back to AuthorizationUrl authority.
+            List<string> issuers;
+            if (configs.Any(c => c.AuthorizationServers?.Any() == true))
+            {
+                issuers = configs
+                    .Where(c => c.AuthorizationServers?.Any() == true)
+                    .SelectMany(c => c.AuthorizationServers)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            else
+            {
+                issuers = configs
+                    .SelectMany(ResolveAuthorizationServers)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
 
             return Results.Ok(new
             {
