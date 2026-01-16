@@ -128,12 +128,37 @@ services.AddLoginTool(sp => new LoginTool());
 
 1.  The user asks Claude: *"Please login"* or uses a tool that requires auth.
 2.  Claude calls the `login_auth_code_pkce` tool.
-3.  MCPify automatically opens the system browser to the login page.
+3.  MCPify automatically opens the system browser to the login page (in interactive environments).
 4.  The user logs in and approves the request.
 5.  The browser redirects back to your application (e.g., `/auth/callback`).
 6.  Your app saves the token and displays a success message.
 7.  The `login_auth_code_pkce` tool detects the successful login and reports back to Claude.
 8.  Claude can now invoke authenticated tools!
+
+### Headless / Remote Environments
+
+When running MCPify on headless servers, containers, or remote environments where a browser cannot be opened, you can configure the login behavior to skip browser launch attempts and immediately return the authorization URL:
+
+```csharp
+builder.Services.AddMcpify(options =>
+{
+    // For headless/remote environments - return URL immediately without browser launch
+    options.LoginBrowserBehavior = BrowserLaunchBehavior.Never;
+});
+```
+
+Available options for `LoginBrowserBehavior`:
+
+| Value | Description |
+|-------|-------------|
+| `Auto` (default) | Automatically detects headless environments (no DISPLAY on Linux, SSH sessions, containers) and skips browser launch when appropriate. |
+| `Always` | Always attempt to open the browser, regardless of environment. |
+| `Never` | Never attempt to open the browser. Returns the authorization URL immediately for manual authentication. Ideal for headless servers and containers. |
+
+With `Auto` mode, MCPify detects headless environments by checking:
+-   **Linux**: Missing `DISPLAY` or `WAYLAND_DISPLAY` environment variables, SSH sessions without X forwarding, Docker containers
+-   **Windows**: Container environments (Kubernetes, Docker)
+-   **macOS**: SSH sessions
 
 ## Contributing
 

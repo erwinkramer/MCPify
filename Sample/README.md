@@ -129,6 +129,7 @@ These can be configured in `appsettings.json` or via command-line arguments.
 -   `Demo:OAuthRedirectPath`: Path for the callback handler (default `/auth/callback`).
 -   `Mcpify:Transport`: `Stdio` or `Http`.
 -   `Mcpify:OpenApiDownloadTimeout`: Timeout for downloading OpenAPI specs.
+-   `Mcpify:LoginBrowserBehavior`: Controls browser launch for OAuth login. Options: `Auto` (default, detects headless environments), `Always`, or `Never` (ideal for remote/headless servers).
 
 ## Troubleshooting
 
