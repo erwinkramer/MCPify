@@ -95,7 +95,13 @@ public static class McpifyServiceExtensions
         });
 
         services.AddSingleton<OpenApiOAuthParser>();
-        services.AddSingleton<OAuthConfigurationStore>();
+
+        var oauthStore = new OAuthConfigurationStore();
+        foreach (var config in opts.OAuthConfigurations)
+        {
+            oauthStore.AddConfiguration(config);
+        }
+        services.AddSingleton(oauthStore);
 
         return services;
     }

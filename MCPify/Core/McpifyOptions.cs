@@ -64,6 +64,11 @@ public class McpifyOptions
     /// Defaults to <see cref="BrowserLaunchBehavior.Auto"/> which detects headless environments at runtime.
     /// </summary>
     public BrowserLaunchBehavior LoginBrowserBehavior { get; set; } = BrowserLaunchBehavior.Auto;
+    
+    /// <summary>
+    /// Optional list of OAuth2 configurations to be added to the OAuthConfigurationStore.
+    /// </summary>
+    public List<OAuth2Configuration> OAuthConfigurations { get; set; } = new();
 }
 
 /// <summary>

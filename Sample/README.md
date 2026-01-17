@@ -80,7 +80,7 @@ To run the server in HTTP mode (using Server-Sent Events):
 
 This sample demonstrates how clients can authenticate with MCPify using OAuth 2.0 Authorization Code flow.
 
-1.  **Discover Authentication**: When an unauthenticated client attempts to use a protected tool (e.g., `api_secrets_get`), MCPify will respond with a `401 Unauthorized` HTTP status code and a `WWW-Authenticate` header, including `resource_metadata_url`. The client should then fetch this metadata.
+1.  **Discover Authentication**: When an unauthenticated client attempts to use a protected tool (e.g., `api_secrets_get`), MCPify will respond with a `401 Unauthorized` HTTP status code and a `WWW-Authenticate` header, including `resource_metadata`. The client should then fetch this metadata.
 2.  **Initiate Login**: The client (e.g., Claude Desktop) will call the `login_auth_code_pkce` tool provided by MCPify. This tool returns an authorization URL.
 3.  **User Authorization**: The user opens the authorization URL in a browser, logs in (using the OpenIddict provider in this sample), and grants consent.
 4.  **Callback and Token Exchange**: After user authorization, the browser redirects to MCPify's callback endpoint (`/auth/callback`). MCPify handles the code exchange and stores the token securely for the specific session.

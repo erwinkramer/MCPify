@@ -63,7 +63,7 @@ public class McpOAuthAuthenticationMiddleware
 
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             context.Response.Headers[HeaderNames.WWWAuthenticate] = 
-                $"Bearer realm=\"MCPify\", resource=\"{resourceUrl}\", resource_metadata_url=\"{metadataUrl}\"";
+                $"Bearer realm=\"MCPify\", resource=\"{resourceUrl}\", resource_metadata=\"{metadataUrl}\"";
             
             return;
         }
