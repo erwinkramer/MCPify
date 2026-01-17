@@ -52,8 +52,37 @@ public class OAuthMiddlewareTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         var authHeader = response.Headers.WwwAuthenticate.ToString();
-        Assert.Contains($"resource=\"{publicUrl}\"", authHeader);
+        // Per MCP spec, WWW-Authenticate should contain resource_metadata URL
         Assert.Contains($"resource_metadata=\"{publicUrl}/.well-known/oauth-protected-resource\"", authHeader);
+    }
+
+    [Fact]
+    public async Task Request_Challenge_IncludesScope_WhenConfigured()
+    {
+        using var host = await CreateHostAsync(services =>
+        {
+            var store = services.GetRequiredService<OAuthConfigurationStore>();
+            store.AddConfiguration(new OAuth2Configuration
+            {
+                AuthorizationUrl = "https://auth",
+                Scopes = new Dictionary<string, string>
+                {
+                    { "read", "Read access" },
+                    { "write", "Write access" }
+                }
+            });
+        });
+
+        var client = host.GetTestClient();
+
+        var response = await client.GetAsync("/mcp");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var authHeader = response.Headers.WwwAuthenticate.ToString();
+        // Per MCP spec, WWW-Authenticate SHOULD include scope parameter
+        Assert.Contains("scope=", authHeader);
+        Assert.Contains("read", authHeader);
+        Assert.Contains("write", authHeader);
     }
 
     [Fact]

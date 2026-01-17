@@ -61,10 +61,23 @@ public class McpOAuthAuthenticationMiddleware
             resourceUrl = resourceUrl.TrimEnd('/');
             var metadataUrl = $"{resourceUrl}/.well-known/oauth-protected-resource";
 
+            // Collect all scopes from OAuth configurations per MCP spec
+            var allScopes = oauthStore.GetConfigurations()
+                .SelectMany(c => c.Scopes.Keys)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            context.Response.Headers[HeaderNames.WWWAuthenticate] = 
-                $"Bearer realm=\"MCPify\", resource=\"{resourceUrl}\", resource_metadata=\"{metadataUrl}\"";
-            
+
+            // Build WWW-Authenticate header per MCP Authorization spec
+            // Include scope parameter when scopes are configured (RFC 6750 Section 3)
+            var wwwAuthenticate = $"Bearer resource_metadata=\"{metadataUrl}\"";
+            if (allScopes.Count > 0)
+            {
+                wwwAuthenticate += $", scope=\"{string.Join(" ", allScopes)}\"";
+            }
+            context.Response.Headers[HeaderNames.WWWAuthenticate] = wwwAuthenticate;
+
             return;
         }
         else
