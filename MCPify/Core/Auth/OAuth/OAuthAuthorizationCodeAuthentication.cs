@@ -31,6 +31,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
     private readonly string _stateSecret;
     private readonly bool _allowDefaultSessionFallback;
     private readonly ISessionMap? _sessionMap; // Optional dependency for Lazy Auth
+    private readonly string? _resourceUrl; // RFC 8707 resource parameter
     private const string _oauthProviderName = "OAuth";
     private const string _pkceStorePrefix = "pkce_";
 
@@ -49,7 +50,8 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         Action<string>? authorizationUrlEmitter = null,
         string? stateSecret = null,
         bool allowDefaultSessionFallback = false,
-        ISessionMap? sessionMap = null)
+        ISessionMap? sessionMap = null,
+        string? resourceUrl = null)
     {
         _clientId = clientId;
         _authorizationEndpoint = authorizationEndpoint;
@@ -66,6 +68,7 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         _stateSecret = stateSecret ?? "A_VERY_LONG_AND_SECURE_SECRET_KEY_FOR_HMAC_SIGNING";
         _allowDefaultSessionFallback = allowDefaultSessionFallback;
         _sessionMap = sessionMap;
+        _resourceUrl = resourceUrl;
     }
 
     public virtual string BuildAuthorizationUrl(string sessionId)
@@ -91,6 +94,11 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
         {
             query["code_challenge"] = pkce.Value.CodeChallenge;
             query["code_challenge_method"] = "S256";
+        }
+        // RFC 8707: Add resource parameter if configured
+        if (!string.IsNullOrEmpty(_resourceUrl))
+        {
+            query["resource"] = _resourceUrl;
         }
 
         return $"{_authorizationEndpoint}?{query}";
@@ -221,25 +229,15 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
 
     private async Task<TokenData> ExchangeCodeForTokenAsync(string code, string redirectUri, string? codeVerifier, CancellationToken cancellationToken)
     {
-        var form = new Dictionary<string, string>
-        {
-            { "grant_type", "authorization_code" },
-            { "client_id", _clientId },
-            { "code", code },
-            { "redirect_uri", redirectUri }
-        };
-
-        if (!string.IsNullOrEmpty(codeVerifier))
-        {
-            form["code_verifier"] = codeVerifier;
-        }
-
-        if (!string.IsNullOrEmpty(_clientSecret))
-        {
-            form["client_secret"] = _clientSecret;
-        }
-
-        var content = new FormUrlEncodedContent(form);
+        var content = FormUrlEncoded.Create()
+            .Add("grant_type", "authorization_code")
+            .Add("client_id", _clientId)
+            .Add("code", code)
+            .Add("redirect_uri", redirectUri)
+            .AddIfNotEmpty("code_verifier", codeVerifier)
+            .AddIfNotEmpty("client_secret", _clientSecret)
+            .AddIfNotEmpty("resource", _resourceUrl)  // RFC 8707
+            .ToContent();
 
         var response = await _httpClient.PostAsync(_tokenEndpoint, content, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -263,19 +261,13 @@ public class OAuthAuthorizationCodeAuthentication : IAuthenticationProvider
 
     private async Task<TokenData> RefreshTokenAsync(string refreshToken, string sessionId, CancellationToken cancellationToken)
     {
-        var form = new Dictionary<string, string>
-        {
-            { "grant_type", "refresh_token" },
-            { "client_id", _clientId },
-            { "refresh_token", refreshToken }
-        };
-
-        if (!string.IsNullOrEmpty(_clientSecret))
-        {
-            form["client_secret"] = _clientSecret;
-        }
-
-        var content = new FormUrlEncodedContent(form);
+        var content = FormUrlEncoded.Create()
+            .Add("grant_type", "refresh_token")
+            .Add("client_id", _clientId)
+            .Add("refresh_token", refreshToken)
+            .AddIfNotEmpty("client_secret", _clientSecret)
+            .AddIfNotEmpty("resource", _resourceUrl)  // RFC 8707
+            .ToContent();
 
         var response = await _httpClient.PostAsync(_tokenEndpoint, content, cancellationToken);
         response.EnsureSuccessStatusCode();

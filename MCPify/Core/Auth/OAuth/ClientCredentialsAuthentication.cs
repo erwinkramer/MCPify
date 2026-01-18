@@ -14,6 +14,7 @@ public class ClientCredentialsAuthentication : IAuthenticationProvider
     private readonly ISecureTokenStore _secureTokenStore;
     private readonly IMcpContextAccessor _mcpContextAccessor;
     private readonly HttpClient _httpClient;
+    private readonly string? _resourceUrl; // RFC 8707 resource parameter
     private const string _clientCredentialsProviderName = "ClientCredentials";
 
     public ClientCredentialsAuthentication(
@@ -23,7 +24,8 @@ public class ClientCredentialsAuthentication : IAuthenticationProvider
         string scope,
         ISecureTokenStore secureTokenStore,
         IMcpContextAccessor mcpContextAccessor,
-        HttpClient? httpClient = null)
+        HttpClient? httpClient = null,
+        string? resourceUrl = null)
     {
         _clientId = clientId;
         _clientSecret = clientSecret;
@@ -32,6 +34,7 @@ public class ClientCredentialsAuthentication : IAuthenticationProvider
         _secureTokenStore = secureTokenStore;
         _mcpContextAccessor = mcpContextAccessor;
         _httpClient = httpClient ?? new HttpClient();
+        _resourceUrl = resourceUrl;
     }
 
     public async Task ApplyAsync(HttpRequestMessage request, CancellationToken cancellationToken = default)
@@ -54,15 +57,13 @@ public class ClientCredentialsAuthentication : IAuthenticationProvider
 
     private async Task<TokenData> RequestTokenAsync(CancellationToken cancellationToken)
     {
-        var form = new Dictionary<string, string>
-        {
-            { "grant_type", "client_credentials" },
-            { "client_id", _clientId },
-            { "client_secret", _clientSecret },
-            { "scope", _scope }
-        };
-
-        var content = new FormUrlEncodedContent(form);
+        var content = FormUrlEncoded.Create()
+            .Add("grant_type", "client_credentials")
+            .Add("client_id", _clientId)
+            .Add("client_secret", _clientSecret)
+            .Add("scope", _scope)
+            .AddIfNotEmpty("resource", _resourceUrl)  // RFC 8707
+            .ToContent();
         var response = await _httpClient.PostAsync(_tokenEndpoint, content, cancellationToken);
         response.EnsureSuccessStatusCode();
 
