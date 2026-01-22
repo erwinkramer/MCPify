@@ -1,9 +1,5 @@
-using System.Collections.Generic;
-using System.Linq;
 using MCPify.Core;
 using MCPify.Core.Auth;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Net.Http.Headers;
 
 namespace MCPify.Hosting;
@@ -35,11 +31,12 @@ public class McpOAuthAuthenticationMiddleware
         var options = context.RequestServices.GetService<McpifyOptions>();
         var oauthStore = context.RequestServices.GetService<OAuthConfigurationStore>();
 
-        var oauthConfigurations = oauthStore?.GetConfigurations().ToList() ?? new List<OAuth2Configuration>();
+        var oauthConfigurations = oauthStore?.GetConfigurations().ToList() ?? [];
         var validationOptions = options?.TokenValidation;
+        var tokenValidationEnabled = validationOptions?.EnableJwtValidation == true;
 
         var challengeScopes = BuildChallengeScopes(oauthConfigurations, validationOptions);
-        var authRequired = oauthConfigurations.Count > 0 || (validationOptions?.EnableJwtValidation == true);
+        var authRequired = oauthConfigurations.Count > 0 || tokenValidationEnabled;
 
         if (!authRequired)
         {
@@ -61,7 +58,7 @@ public class McpOAuthAuthenticationMiddleware
             accessor.AccessToken = token;
         }
 
-        if (validationOptions?.EnableJwtValidation == true)
+        if (tokenValidationEnabled && validationOptions != null)
         {
             var validator = context.RequestServices.GetService<IAccessTokenValidator>();
             if (validator != null)
@@ -120,6 +117,14 @@ public class McpOAuthAuthenticationMiddleware
         IReadOnlyCollection<OAuth2Configuration> configurations,
         TokenValidationOptions? validationOptions)
     {
+        var defaultScopes = validationOptions?.DefaultRequiredScopes;
+        var hasDefaultScopes = defaultScopes is { Count: > 0 };
+
+        if (configurations.Count == 0 && !hasDefaultScopes)
+        {
+            return Array.Empty<string>();
+        }
+
         var scopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var configuration in configurations)
@@ -130,9 +135,9 @@ public class McpOAuthAuthenticationMiddleware
             }
         }
 
-        if (validationOptions?.DefaultRequiredScopes != null)
+        if (hasDefaultScopes && defaultScopes != null)
         {
-            foreach (var scope in validationOptions.DefaultRequiredScopes)
+            foreach (var scope in defaultScopes)
             {
                 scopes.Add(scope);
             }
@@ -202,7 +207,12 @@ public class McpOAuthAuthenticationMiddleware
         string? errorCode,
         string? errorDescription)
     {
-        var parts = new List<string>
+        if (string.IsNullOrEmpty(errorCode) && string.IsNullOrEmpty(errorDescription) && scopes.Count == 0)
+        {
+            return $"Bearer resource_metadata=\"{metadataUrl}\"";
+        }
+
+        var parts = new List<string>(4)
         {
             $"Bearer resource_metadata=\"{metadataUrl}\""
         };
