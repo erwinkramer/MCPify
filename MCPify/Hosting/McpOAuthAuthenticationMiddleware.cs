@@ -1,7 +1,5 @@
 using MCPify.Core;
 using MCPify.Core.Auth;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Net.Http.Headers;
 
 namespace MCPify.Hosting;
@@ -10,9 +8,6 @@ public class McpOAuthAuthenticationMiddleware
 {
     private readonly RequestDelegate _next;
 
-    /// <summary>
-    /// Key for storing token validation result in HttpContext.Items for downstream use.
-    /// </summary>
     public const string TokenValidationResultKey = "McpTokenValidationResult";
 
     public McpOAuthAuthenticationMiddleware(RequestDelegate next)
@@ -22,57 +17,48 @@ public class McpOAuthAuthenticationMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        // Skip check for metadata endpoint and other non-MCP endpoints
         var path = context.Request.Path;
         if (path.StartsWithSegments("/.well-known") ||
             path.StartsWithSegments("/swagger") ||
             path.StartsWithSegments("/health") ||
-            path.StartsWithSegments("/connect") || // OpenIddict or Auth endpoints
-            path.StartsWithSegments("/auth"))      // Callback paths
+            path.StartsWithSegments("/connect") ||
+            path.StartsWithSegments("/auth"))
         {
             await _next(context);
             return;
         }
 
-        // Check if OAuth is configured
-        var oauthStore = context.RequestServices.GetService<OAuthConfigurationStore>();
         var options = context.RequestServices.GetService<McpifyOptions>();
+        var oauthStore = context.RequestServices.GetService<OAuthConfigurationStore>();
 
-        if (oauthStore == null || !oauthStore.GetConfigurations().Any())
+        var oauthConfigurations = oauthStore?.GetConfigurations().ToList() ?? [];
+        var validationOptions = options?.TokenValidation;
+        var tokenValidationEnabled = validationOptions?.EnableJwtValidation == true;
+
+        var challengeScopes = BuildChallengeScopes(oauthConfigurations, validationOptions);
+        var authRequired = oauthConfigurations.Count > 0 || tokenValidationEnabled;
+
+        if (!authRequired)
         {
             await _next(context);
             return;
         }
 
-        var accessor = context.RequestServices.GetService<IMcpContextAccessor>();
         var resourceUrl = GetResourceUrl(context, options);
+        var accessor = context.RequestServices.GetService<IMcpContextAccessor>();
 
-        // Check for Authorization header
-        string? authorization = context.Request.Headers[HeaderNames.Authorization];
-        if (string.IsNullOrEmpty(authorization) || !authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        if (!TryGetBearerToken(context, out var token))
         {
-            // No token - return 401 challenge
-            await WriteChallengeResponse(context, oauthStore, resourceUrl, null, null);
+            await WriteChallengeResponse(context, resourceUrl, challengeScopes, null, null);
             return;
         }
 
-        // Extract token
-        var token = authorization.Substring("Bearer ".Length).Trim();
-        if (string.IsNullOrEmpty(token))
-        {
-            await WriteChallengeResponse(context, oauthStore, resourceUrl, null, null);
-            return;
-        }
-
-        // Set token on accessor for downstream use
         if (accessor != null)
         {
             accessor.AccessToken = token;
         }
 
-        // Perform token validation if enabled
-        var validationOptions = options?.TokenValidation;
-        if (validationOptions?.EnableJwtValidation == true)
+        if (tokenValidationEnabled && validationOptions != null)
         {
             var validator = context.RequestServices.GetService<IAccessTokenValidator>();
             if (validator != null)
@@ -82,31 +68,24 @@ public class McpOAuthAuthenticationMiddleware
                     : null;
 
                 var validationResult = await validator.ValidateAsync(token, expectedAudience, context.RequestAborted);
-
-                // Store validation result for downstream use
                 context.Items[TokenValidationResultKey] = validationResult;
 
                 if (!validationResult.IsValid)
                 {
-                    // Token is invalid (expired, malformed, wrong audience) - return 401
-                    await WriteInvalidTokenResponse(context, oauthStore, resourceUrl,
+                    await WriteChallengeResponse(context, resourceUrl, challengeScopes,
                         validationResult.ErrorCode ?? "invalid_token",
                         validationResult.ErrorDescription ?? "Token validation failed");
                     return;
                 }
 
-                // Validate scopes if enabled
                 if (validationOptions.ValidateScopes)
                 {
                     var scopeStore = context.RequestServices.GetService<ScopeRequirementStore>();
                     if (scopeStore != null)
                     {
-                        // Use default validation (no specific tool name available at middleware level)
                         var scopeResult = scopeStore.ValidateScopesForTool("*", validationResult.Scopes);
-
                         if (!scopeResult.IsValid)
                         {
-                            // Token is valid but lacks required scopes - return 403
                             await WriteInsufficientScopeResponse(context, resourceUrl, scopeResult.MissingScopes);
                             return;
                         }
@@ -134,50 +113,69 @@ public class McpOAuthAuthenticationMiddleware
         return resourceUrl.TrimEnd('/');
     }
 
-    private static async Task WriteChallengeResponse(
+    private static IReadOnlyList<string> BuildChallengeScopes(
+        IReadOnlyCollection<OAuth2Configuration> configurations,
+        TokenValidationOptions? validationOptions)
+    {
+        var defaultScopes = validationOptions?.DefaultRequiredScopes;
+        var hasDefaultScopes = defaultScopes is { Count: > 0 };
+
+        if (configurations.Count == 0 && !hasDefaultScopes)
+        {
+            return Array.Empty<string>();
+        }
+
+        var scopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var configuration in configurations)
+        {
+            foreach (var scope in configuration.Scopes.Keys)
+            {
+                scopes.Add(scope);
+            }
+        }
+
+        if (hasDefaultScopes && defaultScopes != null)
+        {
+            foreach (var scope in defaultScopes)
+            {
+                scopes.Add(scope);
+            }
+        }
+
+        return scopes.ToList();
+    }
+
+    private static bool TryGetBearerToken(HttpContext context, out string token)
+    {
+        token = string.Empty;
+        string? authorization = context.Request.Headers[HeaderNames.Authorization];
+
+        if (string.IsNullOrEmpty(authorization) ||
+            !authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        token = authorization.Substring("Bearer ".Length).Trim();
+        return !string.IsNullOrEmpty(token);
+    }
+
+    private static Task WriteChallengeResponse(
         HttpContext context,
-        OAuthConfigurationStore oauthStore,
         string resourceUrl,
+        IReadOnlyList<string> scopes,
         string? errorCode,
         string? errorDescription)
     {
-        var metadataUrl = $"{resourceUrl}/.well-known/oauth-protected-resource";
-
-        // Collect all scopes from OAuth configurations per MCP spec
-        var allScopes = oauthStore.GetConfigurations()
-            .SelectMany(c => c.Scopes.Keys)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-
-        // Build WWW-Authenticate header per MCP Authorization spec
-        var wwwAuthenticate = BuildWwwAuthenticateHeader(metadataUrl, allScopes, errorCode, errorDescription);
-        context.Response.Headers[HeaderNames.WWWAuthenticate] = wwwAuthenticate;
+        var metadataUrl = $"{resourceUrl}/.well-known/oauth-protected-resource";
+        context.Response.Headers[HeaderNames.WWWAuthenticate] =
+            BuildWwwAuthenticateHeader(metadataUrl, scopes, errorCode, errorDescription);
+        return Task.CompletedTask;
     }
 
-    private static async Task WriteInvalidTokenResponse(
-        HttpContext context,
-        OAuthConfigurationStore oauthStore,
-        string resourceUrl,
-        string errorCode,
-        string errorDescription)
-    {
-        var metadataUrl = $"{resourceUrl}/.well-known/oauth-protected-resource";
-
-        // Collect all scopes from OAuth configurations
-        var allScopes = oauthStore.GetConfigurations()
-            .SelectMany(c => c.Scopes.Keys)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-
-        var wwwAuthenticate = BuildWwwAuthenticateHeader(metadataUrl, allScopes, errorCode, errorDescription);
-        context.Response.Headers[HeaderNames.WWWAuthenticate] = wwwAuthenticate;
-    }
-
-    private static async Task WriteInsufficientScopeResponse(
+    private static Task WriteInsufficientScopeResponse(
         HttpContext context,
         string resourceUrl,
         IReadOnlyList<string> requiredScopes)
@@ -186,7 +184,6 @@ public class McpOAuthAuthenticationMiddleware
 
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
 
-        // Build WWW-Authenticate header for insufficient_scope per RFC 6750 Section 3.1
         var parts = new List<string>
         {
             "Bearer",
@@ -201,6 +198,7 @@ public class McpOAuthAuthenticationMiddleware
         }
 
         context.Response.Headers[HeaderNames.WWWAuthenticate] = string.Join(", ", parts);
+        return Task.CompletedTask;
     }
 
     private static string BuildWwwAuthenticateHeader(
@@ -209,7 +207,15 @@ public class McpOAuthAuthenticationMiddleware
         string? errorCode,
         string? errorDescription)
     {
-        var parts = new List<string> { $"Bearer resource_metadata=\"{metadataUrl}\"" };
+        if (string.IsNullOrEmpty(errorCode) && string.IsNullOrEmpty(errorDescription) && scopes.Count == 0)
+        {
+            return $"Bearer resource_metadata=\"{metadataUrl}\"";
+        }
+
+        var parts = new List<string>(4)
+        {
+            $"Bearer resource_metadata=\"{metadataUrl}\""
+        };
 
         if (!string.IsNullOrEmpty(errorCode))
         {
@@ -218,7 +224,6 @@ public class McpOAuthAuthenticationMiddleware
 
         if (!string.IsNullOrEmpty(errorDescription))
         {
-            // Escape quotes in description
             var escapedDescription = errorDescription.Replace("\"", "\\\"");
             parts.Add($"error_description=\"{escapedDescription}\"");
         }
