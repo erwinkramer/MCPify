@@ -18,47 +18,42 @@ public sealed class TestApiServer : IAsyncDisposable
         var port = GetRandomUnusedPort();
         BaseUrl = $"http://localhost:{port}";
 
-        _host = Host.CreateDefaultBuilder()
-            .ConfigureWebHostDefaults(builder =>
-            {
-                builder.UseUrls(BaseUrl);
-                builder.Configure(ConfigureApp);
-            })
-            .Build();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls(BaseUrl);
+
+        var app = builder.Build();
+        ConfigureApp(app);
+        _host = app;
     }
 
     public async Task StartAsync() => await _host.StartAsync();
 
     public HttpClient CreateClient() => new() { BaseAddress = new Uri(BaseUrl) };
 
-    private void ConfigureApp(IApplicationBuilder app)
+    private void ConfigureApp(WebApplication app)
     {
-        app.UseRouting();
-        app.UseEndpoints(endpoints =>
+        app.MapGet("/users/{id:int}", async context =>
         {
-            endpoints.MapGet("/users/{id:int}", async context =>
+            var id = int.Parse(context.Request.RouteValues["id"]?.ToString() ?? "0");
+            await context.Response.WriteAsJsonAsync(new
             {
-                var id = int.Parse(context.Request.RouteValues["id"]?.ToString() ?? "0");
-                await context.Response.WriteAsJsonAsync(new
-                {
-                    id,
-                    path = context.Request.Path.Value,
-                    query = context.Request.QueryString.Value
-                });
+                id,
+                path = context.Request.Path.Value,
+                query = context.Request.QueryString.Value
             });
+        });
 
-            endpoints.MapPost("/echo", async context =>
-            {
-                using var reader = new StreamReader(context.Request.Body);
-                var body = await reader.ReadToEndAsync();
-                await context.Response.WriteAsync(body);
-            });
+        app.MapPost("/echo", async context =>
+        {
+            using var reader = new StreamReader(context.Request.Body);
+            var body = await reader.ReadToEndAsync();
+            await context.Response.WriteAsync(body);
+        });
 
-            endpoints.MapGet("/auth-check", async context =>
-            {
-                var auth = context.Request.Headers.Authorization.ToString();
-                await context.Response.WriteAsJsonAsync(new { authorization = auth });
-            });
+        app.MapGet("/auth-check", async context =>
+        {
+            var auth = context.Request.Headers.Authorization.ToString();
+            await context.Response.WriteAsJsonAsync(new { authorization = auth });
         });
     }
 

@@ -17,37 +17,7 @@ public class OAuthChallengeTokenValidationTests
     [Fact]
     public async Task PostWithoutSession_ReturnsUnauthorizedChallenge_WhenTokenValidationEnabled()
     {
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder
-                    .UseTestServer()
-                    .ConfigureServices(services =>
-                    {
-                        services.AddLogging();
-                        services.AddRouting();
-                        services.AddMcpify(options =>
-                        {
-                            options.Transport = McpTransportType.Http;
-                            options.TokenValidation = new TokenValidationOptions
-                            {
-                                EnableJwtValidation = true,
-                                ValidateAudience = true
-                            };
-                        });
-                    })
-                    .Configure(app =>
-                    {
-                        app.UseRouting();
-                        app.UseMcpifyContext();
-                        app.UseMcpifyOAuth();
-                        app.UseEndpoints(endpoints =>
-                        {
-                            endpoints.MapMcpifyEndpoint();
-                        });
-                    });
-            })
-            .StartAsync();
+        await using var host = await CreateHostAsync();
 
         var options = host.Services.GetRequiredService<McpifyOptions>();
         Assert.True(options.TokenValidation?.EnableJwtValidation, "Token validation should be enabled");
@@ -72,5 +42,30 @@ public class OAuthChallengeTokenValidationTests
 
         Assert.Contains(response.Headers.WwwAuthenticate, header =>
             string.Equals(header.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static async Task<WebApplication> CreateHostAsync()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+
+        builder.Services.AddLogging();
+        builder.Services.AddMcpify(options =>
+        {
+            options.Transport = McpTransportType.Http;
+            options.TokenValidation = new TokenValidationOptions
+            {
+                EnableJwtValidation = true,
+                ValidateAudience = true
+            };
+        });
+
+        var app = builder.Build();
+        app.UseMcpifyContext();
+        app.UseMcpifyOAuth();
+        app.MapMcpifyEndpoint();
+
+        await app.StartAsync();
+        return app;
     }
 }
