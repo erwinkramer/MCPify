@@ -143,12 +143,6 @@ public static class DemoServiceExtensions
             options.Transport = transport;
             options.ResourceUrlOverride = baseUrl;
 
-            options.TokenValidation = new TokenValidationOptions
-            {
-                EnableJwtValidation = true,
-                ValidateAudience = true
-            };
-
             // Expose the local API (which is now the "Real" API)
             options.LocalEndpoints = new()
             {

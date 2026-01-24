@@ -49,8 +49,6 @@ app.UseCors("AllowAll");
 app.UseSwagger();
 app.UseSwaggerUI();
 
-app.UseMcpifyContext();
-app.UseMcpifyOAuth();
 app.UseAuthentication();
 app.UseAuthorization();
 

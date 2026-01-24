@@ -1,4 +1,8 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using MCPify.Core;
@@ -7,49 +11,114 @@ using MCPify.Hosting;
 using MCPify.OpenApi;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.OpenApi.Models;
 
 namespace MCPify.Tests.Integration;
 
-/// <summary>
-/// Integration tests verifying that OAuth scopes from OpenAPI specs
-/// are automatically enforced during token validation.
-/// </summary>
 public class OpenApiOAuthScopeIntegrationTests
 {
-    #region Test Helpers
-
-    private static string CreateJwt(object payload)
+    [Fact]
+    public void OpenApiParser_ExtractsScopes_AndAddsToStore()
     {
-        var header = new { alg = "HS256", typ = "JWT" };
-        var headerJson = JsonSerializer.Serialize(header);
-        var payloadJson = JsonSerializer.Serialize(payload);
+        var parser = new OpenApiOAuthParser();
+        var store = new OAuthConfigurationStore();
+        var doc = CreateOpenApiDocWithOAuth("read", "write", "admin");
 
-        var headerB64 = Base64UrlEncode(Encoding.UTF8.GetBytes(headerJson));
-        var payloadB64 = Base64UrlEncode(Encoding.UTF8.GetBytes(payloadJson));
-        var signatureB64 = Base64UrlEncode(Encoding.UTF8.GetBytes("dummy-signature"));
+        var config = parser.Parse(doc);
+        if (config != null)
+        {
+            store.AddConfiguration(config);
+        }
 
-        return $"{headerB64}.{payloadB64}.{signatureB64}";
+        Assert.NotNull(config);
+        Assert.Equal(3, config!.Scopes.Count);
+        Assert.Contains("read", config.Scopes.Keys);
+        Assert.Contains("write", config.Scopes.Keys);
+        Assert.Contains("admin", config.Scopes.Keys);
+
+        var stored = store.GetConfigurations().ToList();
+        Assert.Single(stored);
+        Assert.Equal(3, stored[0].Scopes.Count);
     }
 
-    private static string Base64UrlEncode(byte[] bytes)
+    [Fact]
+    public async Task MetadataEndpoint_ReturnsScopes_FromOpenApiConfiguration()
     {
-        return Convert.ToBase64String(bytes)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
+        var parser = new OpenApiOAuthParser();
+        var config = parser.Parse(CreateOpenApiDocWithOAuth("api.read", "api.write"));
+        Assert.NotNull(config);
+
+        await using var app = await CreateHostAsync(options =>
+        {
+            options.OAuthConfigurations.Add(config!);
+        });
+
+        var client = app.GetTestClient();
+        var response = await client.GetAsync("/.well-known/oauth-protected-resource");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var scopes = payload.RootElement.GetProperty("scopes_supported").EnumerateArray()
+            .Select(element => element.GetString())
+            .Where(scope => scope != null)
+            .ToList();
+
+        Assert.Contains("api.read", scopes);
+        Assert.Contains("api.write", scopes);
     }
 
-    /// <summary>
-    /// Creates an OpenAPI document with OAuth2 security scheme containing specified scopes.
-    /// </summary>
+    [Fact]
+    public async Task Challenge_ListsScopes_FromOpenApiConfiguration()
+    {
+        var parser = new OpenApiOAuthParser();
+        var config = parser.Parse(CreateOpenApiDocWithOAuth("api.read", "api.write"));
+        Assert.NotNull(config);
+
+        await using var app = await CreateHostAsync(options =>
+        {
+            options.OAuthConfigurations.Add(config!);
+        });
+
+        using var request = CreateJsonRpcRequest();
+        var response = await app.GetTestClient().SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var header = string.Join(" ", response.Headers.WwwAuthenticate.Select(h => h.ToString()));
+        Assert.Contains("resource_metadata=\"http://localhost/.well-known/oauth-protected-resource", header);
+
+        var metadataPayload = await app.GetTestClient().GetStringAsync("/.well-known/oauth-protected-resource");
+        using var metadata = JsonDocument.Parse(metadataPayload);
+        var scopes = metadata.RootElement.GetProperty("scopes_supported").EnumerateArray()
+            .Select(element => element.GetString())
+            .Where(scope => scope != null)
+            .ToList();
+
+        Assert.Contains("api.read", scopes);
+        Assert.Contains("api.write", scopes);
+    }
+
+    private static HttpRequestMessage CreateJsonRpcRequest()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, "/mcp");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        request.Content = new StringContent("""
+        {
+            "jsonrpc": "2.0",
+            "method": "ping",
+            "params": {},
+            "id": 1
+        }
+        """, Encoding.UTF8, "application/json");
+        return request;
+    }
+
     private static OpenApiDocument CreateOpenApiDocWithOAuth(params string[] scopes)
     {
-        var scopeDict = scopes.ToDictionary(s => s, s => $"{s} access");
+        var scopeDict = scopes.ToDictionary(scope => scope, scope => $"{scope} access");
 
         return new OpenApiDocument
         {
@@ -93,340 +162,25 @@ public class OpenApiOAuthScopeIntegrationTests
         };
     }
 
-    #endregion
-
-    [Fact]
-    public void OpenApiParser_ExtractsScopes_AndAddsToStore()
+    private static async Task<WebApplication> CreateHostAsync(Action<McpifyOptions>? configureOptions = null)
     {
-        // Arrange
-        var parser = new OpenApiOAuthParser();
-        var store = new OAuthConfigurationStore();
-        var doc = CreateOpenApiDocWithOAuth("read", "write", "admin");
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
 
-        // Act
-        var config = parser.Parse(doc);
-        if (config != null)
+        builder.Services.AddLogging();
+        builder.Services.AddAuthorization();
+        builder.Services.AddMcpify(options =>
         {
-            store.AddConfiguration(config);
-        }
-
-        // Assert
-        Assert.NotNull(config);
-        Assert.Equal(3, config.Scopes.Count);
-        Assert.Contains("read", config.Scopes.Keys);
-        Assert.Contains("write", config.Scopes.Keys);
-        Assert.Contains("admin", config.Scopes.Keys);
-
-        var storedConfigs = store.GetConfigurations().ToList();
-        Assert.Single(storedConfigs);
-        Assert.Equal(3, storedConfigs[0].Scopes.Count);
-    }
-
-    [Fact]
-    public void ScopeRequirementStore_UsesOpenApiScopes_WhenRequireOAuthConfiguredScopesEnabled()
-    {
-        // Arrange
-        var parser = new OpenApiOAuthParser();
-        var oauthStore = new OAuthConfigurationStore();
-        var doc = CreateOpenApiDocWithOAuth("api.read", "api.write");
-
-        var config = parser.Parse(doc);
-        oauthStore.AddConfiguration(config!);
-
-        var options = new TokenValidationOptions
-        {
-            RequireOAuthConfiguredScopes = true
-        };
-        var scopeStore = new ScopeRequirementStore(new List<ScopeRequirement>(), options, oauthStore);
-
-        // Act & Assert - Token with all scopes passes
-        var validResult = scopeStore.ValidateScopesForTool("any_tool", new[] { "api.read", "api.write" });
-        Assert.True(validResult.IsValid);
-
-        // Token missing one scope fails
-        var invalidResult = scopeStore.ValidateScopesForTool("any_tool", new[] { "api.read" });
-        Assert.False(invalidResult.IsValid);
-        Assert.Contains("api.write", invalidResult.MissingScopes);
-
-        // Token with no scopes fails
-        var emptyResult = scopeStore.ValidateScopesForTool("any_tool", Array.Empty<string>());
-        Assert.False(emptyResult.IsValid);
-        Assert.Contains("api.read", emptyResult.MissingScopes);
-        Assert.Contains("api.write", emptyResult.MissingScopes);
-    }
-
-    [Fact]
-    public async Task Middleware_Returns403_WhenTokenLacksOpenApiDefinedScopes()
-    {
-        // This test simulates the full flow:
-        // 1. OAuth config with scopes is added to store (simulating OpenAPI parsing)
-        // 2. Token validation is enabled with RequireOAuthConfiguredScopes
-        // 3. Request with token missing scopes gets 403
-
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder
-                    .UseTestServer()
-                    .ConfigureServices(services =>
-                    {
-                        services.AddMcpify(options =>
-                        {
-                            options.TokenValidation = new TokenValidationOptions
-                            {
-                                EnableJwtValidation = true,
-                                ValidateScopes = true,
-                                RequireOAuthConfiguredScopes = true
-                            };
-                        });
-                        services.AddLogging();
-                    })
-                    .Configure(app =>
-                    {
-                        // Simulate OAuth config from OpenAPI (normally done by McpifyServiceRegistrar)
-                        var oauthStore = app.ApplicationServices.GetRequiredService<OAuthConfigurationStore>();
-                        oauthStore.AddConfiguration(new OAuth2Configuration
-                        {
-                            AuthorizationUrl = "https://auth.example.com/authorize",
-                            TokenUrl = "https://auth.example.com/token",
-                            Scopes = new Dictionary<string, string>
-                            {
-                                { "api.read", "Read API" },
-                                { "api.write", "Write API" }
-                            }
-                        });
-
-                        app.UseMcpifyOAuth();
-                        app.Map("/mcp", b => b.Run(async c =>
-                        {
-                            c.Response.StatusCode = 200;
-                            await c.Response.WriteAsync("OK");
-                        }));
-                    });
-            })
-            .StartAsync();
-
-        var client = host.GetTestClient();
-
-        // Token with only 'api.read' scope - missing 'api.write'
-        var token = CreateJwt(new
-        {
-            sub = "user123",
-            scope = "api.read",
-            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
+            options.Transport = McpTransportType.Http;
+            configureOptions?.Invoke(options);
         });
-        client.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
-        // Act
-        var response = await client.GetAsync("/mcp");
+        var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapMcpifyEndpoint("/mcp");
 
-        // Assert
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        var authHeader = response.Headers.WwwAuthenticate.ToString();
-        Assert.Contains("insufficient_scope", authHeader);
-        Assert.Contains("api.write", authHeader);
-    }
-
-    [Fact]
-    public async Task Middleware_Returns200_WhenTokenHasAllOpenApiDefinedScopes()
-    {
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder
-                    .UseTestServer()
-                    .ConfigureServices(services =>
-                    {
-                        services.AddMcpify(options =>
-                        {
-                            options.TokenValidation = new TokenValidationOptions
-                            {
-                                EnableJwtValidation = true,
-                                ValidateScopes = true,
-                                RequireOAuthConfiguredScopes = true
-                            };
-                        });
-                        services.AddLogging();
-                    })
-                    .Configure(app =>
-                    {
-                        // Simulate OAuth config from OpenAPI
-                        var oauthStore = app.ApplicationServices.GetRequiredService<OAuthConfigurationStore>();
-                        oauthStore.AddConfiguration(new OAuth2Configuration
-                        {
-                            AuthorizationUrl = "https://auth.example.com/authorize",
-                            TokenUrl = "https://auth.example.com/token",
-                            Scopes = new Dictionary<string, string>
-                            {
-                                { "api.read", "Read API" },
-                                { "api.write", "Write API" }
-                            }
-                        });
-
-                        app.UseMcpifyOAuth();
-                        app.Map("/mcp", b => b.Run(async c =>
-                        {
-                            c.Response.StatusCode = 200;
-                            await c.Response.WriteAsync("OK");
-                        }));
-                    });
-            })
-            .StartAsync();
-
-        var client = host.GetTestClient();
-
-        // Token with all required scopes
-        var token = CreateJwt(new
-        {
-            sub = "user123",
-            scope = "api.read api.write",
-            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
-        });
-        client.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-        // Act
-        var response = await client.GetAsync("/mcp");
-
-        // Assert
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Middleware_IgnoresOpenApiScopes_WhenRequireOAuthConfiguredScopesDisabled()
-    {
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder
-                    .UseTestServer()
-                    .ConfigureServices(services =>
-                    {
-                        services.AddMcpify(options =>
-                        {
-                            options.TokenValidation = new TokenValidationOptions
-                            {
-                                EnableJwtValidation = true,
-                                ValidateScopes = true,
-                                RequireOAuthConfiguredScopes = false // Disabled
-                            };
-                        });
-                        services.AddLogging();
-                    })
-                    .Configure(app =>
-                    {
-                        // OAuth config exists but RequireOAuthConfiguredScopes is false
-                        var oauthStore = app.ApplicationServices.GetRequiredService<OAuthConfigurationStore>();
-                        oauthStore.AddConfiguration(new OAuth2Configuration
-                        {
-                            AuthorizationUrl = "https://auth.example.com/authorize",
-                            Scopes = new Dictionary<string, string>
-                            {
-                                { "api.read", "Read API" },
-                                { "api.write", "Write API" }
-                            }
-                        });
-
-                        app.UseMcpifyOAuth();
-                        app.Map("/mcp", b => b.Run(async c =>
-                        {
-                            c.Response.StatusCode = 200;
-                            await c.Response.WriteAsync("OK");
-                        }));
-                    });
-            })
-            .StartAsync();
-
-        var client = host.GetTestClient();
-
-        // Token with NO scopes - should still pass since RequireOAuthConfiguredScopes is false
-        var token = CreateJwt(new
-        {
-            sub = "user123",
-            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
-        });
-        client.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-        // Act
-        var response = await client.GetAsync("/mcp");
-
-        // Assert - Should pass because OAuth scopes are not required
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Middleware_CombinesOpenApiScopes_WithDefaultRequiredScopes()
-    {
-        using var host = await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder
-                    .UseTestServer()
-                    .ConfigureServices(services =>
-                    {
-                        services.AddMcpify(options =>
-                        {
-                            options.TokenValidation = new TokenValidationOptions
-                            {
-                                EnableJwtValidation = true,
-                                ValidateScopes = true,
-                                RequireOAuthConfiguredScopes = true,
-                                DefaultRequiredScopes = new List<string> { "mcp.access" } // Additional scope
-                            };
-                        });
-                        services.AddLogging();
-                    })
-                    .Configure(app =>
-                    {
-                        var oauthStore = app.ApplicationServices.GetRequiredService<OAuthConfigurationStore>();
-                        oauthStore.AddConfiguration(new OAuth2Configuration
-                        {
-                            AuthorizationUrl = "https://auth.example.com/authorize",
-                            Scopes = new Dictionary<string, string>
-                            {
-                                { "api.read", "Read API" }
-                            }
-                        });
-
-                        app.UseMcpifyOAuth();
-                        app.Map("/mcp", b => b.Run(async c =>
-                        {
-                            c.Response.StatusCode = 200;
-                            await c.Response.WriteAsync("OK");
-                        }));
-                    });
-            })
-            .StartAsync();
-
-        var client = host.GetTestClient();
-
-        // Token with OpenAPI scope but missing default scope
-        var tokenMissingDefault = CreateJwt(new
-        {
-            sub = "user123",
-            scope = "api.read",
-            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
-        });
-        client.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenMissingDefault);
-
-        var response1 = await client.GetAsync("/mcp");
-        Assert.Equal(HttpStatusCode.Forbidden, response1.StatusCode);
-        Assert.Contains("mcp.access", response1.Headers.WwwAuthenticate.ToString());
-
-        // Token with all scopes (OpenAPI + default)
-        var tokenComplete = CreateJwt(new
-        {
-            sub = "user123",
-            scope = "api.read mcp.access",
-            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
-        });
-        client.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", tokenComplete);
-
-        var response2 = await client.GetAsync("/mcp");
-        Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
+        await app.StartAsync();
+        return app;
     }
 }

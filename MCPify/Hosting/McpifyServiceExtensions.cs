@@ -7,10 +7,15 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Server;
 using System.Net.Http;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using MCPify.Core.Auth;
 using MCPify.Core.Session;
 using System.IO;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using ModelContextProtocol.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 
 namespace MCPify.Hosting;
 
@@ -103,35 +108,23 @@ public static class McpifyServiceExtensions
         }
         services.AddSingleton(oauthStore);
 
-        // Register token validation services if enabled
-        if (opts.TokenValidation != null)
-        {
-            services.AddSingleton(opts.TokenValidation);
+        services.AddSingleton<IAuthorizationHandler, ScopeRequirementHandler>();
 
-            if (opts.TokenValidation.EnableJwtValidation)
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IConfigureOptions<McpAuthenticationOptions>, McpAuthenticationOptionsSetup>());
+        services.TryAddEnumerable(ServiceDescriptor.Transient<IConfigureNamedOptions<McpAuthenticationOptions>, McpAuthenticationOptionsSetup>());
+
+        services.AddAuthentication(options =>
             {
-                services.AddSingleton<IAccessTokenValidator>(sp =>
-                    new JwtAccessTokenValidator(sp.GetRequiredService<TokenValidationOptions>()));
-            }
-
-            // Register scope requirement store with access to OAuth configurations
-            services.AddSingleton(sp =>
-                new ScopeRequirementStore(
-                    opts.ScopeRequirements,
-                    sp.GetRequiredService<TokenValidationOptions>(),
-                    sp.GetService<OAuthConfigurationStore>()));
-        }
-        else
-        {
-            // Register empty token validation options for when validation is not configured
-            var defaultOptions = new TokenValidationOptions();
-            services.AddSingleton(defaultOptions);
-            services.AddSingleton(sp =>
-                new ScopeRequirementStore(
-                    opts.ScopeRequirements,
-                    defaultOptions,
-                    sp.GetService<OAuthConfigurationStore>()));
-        }
+                options.DefaultScheme = McpAuthenticationDefaults.AuthenticationScheme;
+                options.DefaultAuthenticateScheme = McpAuthenticationDefaults.AuthenticationScheme;
+                options.DefaultChallengeScheme = McpAuthenticationDefaults.AuthenticationScheme;
+            })
+            .AddScheme<McpAuthenticationOptions, McpAuthenticationHandler>(
+                McpAuthenticationDefaults.AuthenticationScheme,
+                _ => { })
+            .AddScheme<McpAuthenticationOptions, McpAuthenticationHandler>(
+                "Bearer",
+                _ => { });
 
         return services;
     }
@@ -174,23 +167,4 @@ public static class McpifyServiceExtensions
         return services;
     }
 
-    /// <summary>
-    /// Adds the MCP context middleware to the pipeline. This is required for accessing session and connection information.
-    /// </summary>
-    /// <param name="builder">The <see cref="IApplicationBuilder"/> instance.</param>
-    /// <returns>The <see cref="IApplicationBuilder"/> instance.</returns>
-    public static IApplicationBuilder UseMcpifyContext(this IApplicationBuilder builder)
-    {
-        return builder.UseMiddleware<McpContextMiddleware>();
-    }
-
-    /// <summary>
-    /// Adds the MCP OAuth authentication middleware to the pipeline. This handles token validation and challenges for protected endpoints.
-    /// </summary>
-    /// <param name="builder">The <see cref="IApplicationBuilder"/> instance.</param>
-    /// <returns>The <see cref="IApplicationBuilder"/> instance.</returns>
-    public static IApplicationBuilder UseMcpifyOAuth(this IApplicationBuilder builder)
-    {
-        return builder.UseMiddleware<McpOAuthAuthenticationMiddleware>();
-    }
 }

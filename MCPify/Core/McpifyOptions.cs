@@ -1,6 +1,6 @@
+using MCPify.Core.Auth;
 using MCPify.OpenApi;
 using MCPify.Schema;
-using MCPify.Core.Auth;
 using Microsoft.AspNetCore.Http;
 
 namespace MCPify.Core;
@@ -70,17 +70,6 @@ public class McpifyOptions
     /// </summary>
     public List<OAuth2Configuration> OAuthConfigurations { get; set; } = new();
 
-    /// <summary>
-    /// Configuration for JWT token validation behavior.
-    /// When null or EnableJwtValidation is false, token validation is skipped for backward compatibility.
-    /// </summary>
-    public TokenValidationOptions? TokenValidation { get; set; }
-
-    /// <summary>
-    /// Per-tool scope requirements. Patterns support wildcards (* and ?).
-    /// These are checked when <see cref="TokenValidation.ValidateScopes"/> is true.
-    /// </summary>
-    public List<ScopeRequirement> ScopeRequirements { get; set; } = new();
 }
 
 /// <summary>

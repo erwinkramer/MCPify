@@ -1,11 +1,13 @@
 using MCPify.Core;
 using MCPify.Core.Auth;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using ModelContextProtocol.Server;
 using MCPify.Endpoints;
 using MCPify.Tools;
 using MCPify.Schema;
+using System.Linq;
 
 namespace MCPify.Hosting;
 
@@ -101,7 +103,12 @@ public static class McpifyEndpointExtensions
 
         if (options.Transport == McpTransportType.Http)
         {
-            app.MapMcp(path);
+            var mcpRoute = app.MapMcp(path);
+            var oauthStore = services.GetService<OAuthConfigurationStore>();
+            if (oauthStore?.GetConfigurations().Any() == true)
+            {
+                mcpRoute.RequireAuthorization();
+            }
         }
 
         // Map OAuth Protected Resource Metadata

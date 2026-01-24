@@ -95,9 +95,7 @@ builder.Services.AddMcpify(options =>
 var app = builder.Build();
 
 // Add Middleware (order matters!)
-app.UseMcpifyContext();           // Must be first
-app.UseMcpifyOAuth();             // Must come before UseAuthentication
-app.UseAuthentication();          // If using ASP.NET Core auth
+app.UseAuthentication();
 app.UseAuthorization();
 
 // ... Map your endpoints ...
@@ -192,9 +190,9 @@ With `Auto` mode, MCPify detects headless environments by checking:
 -   **Windows**: Container environments (Kubernetes, Docker)
 -   **macOS**: SSH sessions
 
-### Token Validation
+### Protected Resource Metadata & Challenges
 
-MCPify supports JWT token validation for enhanced security. Token validation is opt-in for backward compatibility.
+MCPify now relies on the official `ModelContextProtocol.AspNetCore` authentication handler for OAuth 2.0. When you call `AddMcpify`, the MCP authentication scheme is registered automatically and the handler issues `WWW-Authenticate` challenges that point back to the protected resource metadata endpoint.
 
 ```csharp
 builder.Services.AddMcpify(options =>
@@ -226,77 +224,17 @@ builder.Services.AddMcpify(options =>
 });
 ```
 
-**Scope Configuration Options:**
-
-| Option | Description |
-|--------|-------------|
-| `RequireOAuthConfiguredScopes = true` | Automatically require all scopes from OAuth configurations. This includes scopes defined in `OAuthConfigurations` **and** scopes discovered from OpenAPI security schemes. |
-| `DefaultRequiredScopes` | Explicitly list required scopes (use when you want different scopes than what's advertised in OAuth config). |
-
-**Automatic Integration with OpenAPI:** When MCPify loads an external API from an OpenAPI spec that includes OAuth2 security schemes (like those configured for Swagger UI), the scopes are automatically parsed and added to the OAuth configuration store. With `RequireOAuthConfiguredScopes = true`, these scopes are automatically enforced during token validation - no duplicate configuration needed.
-
-When validation fails, MCPify returns appropriate HTTP responses:
-
-| Scenario | Status Code | WWW-Authenticate |
-|----------|-------------|------------------|
-| No token provided | 401 Unauthorized | `Bearer resource_metadata="..."` |
-| Token expired | 401 Unauthorized | `Bearer error="invalid_token", error_description="Token has expired"` |
-| Wrong audience | 401 Unauthorized | `Bearer error="invalid_token", error_description="Token audience does not match..."` |
-| Missing scopes | 403 Forbidden | `Bearer error="insufficient_scope", scope="required_scope"` |
-
-### Per-Tool Scope Requirements
-
-Define granular scope requirements for specific tools using pattern matching:
+If you need to customize the advertised metadata—for example to add documentation links or override the detected resource URL—you can configure `McpAuthenticationOptions`:
 
 ```csharp
-builder.Services.AddMcpify(options =>
+builder.Services.PostConfigure<McpAuthenticationOptions>(options =>
 {
-    options.TokenValidation = new TokenValidationOptions
-    {
-        EnableJwtValidation = true,
-        ValidateScopes = true,
-        DefaultRequiredScopes = new List<string> { "mcp.access" }
-    };
-
-    // Define per-tool scope requirements
-    options.ScopeRequirements = new List<ScopeRequirement>
-    {
-        // All admin_* tools require 'admin' scope
-        new ScopeRequirement
-        {
-            Pattern = "admin_*",
-            RequiredScopes = new List<string> { "admin" }
-        },
-        // Write operations require 'write' scope
-        new ScopeRequirement
-        {
-            Pattern = "*_create",
-            RequiredScopes = new List<string> { "write" }
-        },
-        new ScopeRequirement
-        {
-            Pattern = "*_update",
-            RequiredScopes = new List<string> { "write" }
-        },
-        new ScopeRequirement
-        {
-            Pattern = "*_delete",
-            RequiredScopes = new List<string> { "write" }
-        },
-        // Read-only tools need at least 'read' OR 'write' scope
-        new ScopeRequirement
-        {
-            Pattern = "*_get",
-            AnyOfScopes = new List<string> { "read", "write" }
-        }
-    };
+    options.ResourceMetadata ??= new ProtectedResourceMetadata();
+    options.ResourceMetadata.Documentation = new Uri("https://docs.example.com/mcp");
 });
 ```
 
-Pattern matching supports:
--   `*` - matches any sequence of characters
--   `?` - matches any single character
--   Exact match - `tool_name`
+Ensure your middleware pipeline includes `app.UseAuthentication();` and `app.UseAuthorization();` so that the handler can participate in requests. Challenges no longer run through a custom middleware; the standard ASP.NET Core authentication flow handles everything.
 
 ### RFC 8707 Resource Parameter
 
