@@ -47,13 +47,12 @@ public sealed class TestOAuthServer : IAsyncDisposable
         _jwk.KeyId = _signingKey.KeyId;
         _jwk.Alg = SecurityAlgorithms.RsaSha256;
 
-        _host = Host.CreateDefaultBuilder()
-            .ConfigureWebHostDefaults(builder =>
-            {
-                builder.UseUrls(BaseUrl);
-                builder.Configure(ConfigureApp);
-            })
-            .Build();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls(BaseUrl);
+
+        var app = builder.Build();
+        ConfigureApp(app);
+        _host = app;
     }
 
     public async Task StartAsync() => await _host.StartAsync();
@@ -68,137 +67,133 @@ public sealed class TestOAuthServer : IAsyncDisposable
 
     public HttpClient CreateClient() => new() { BaseAddress = new Uri(BaseUrl) };
 
-    private void ConfigureApp(IApplicationBuilder app)
+    private void ConfigureApp(WebApplication app)
     {
-        app.UseRouting();
-        app.UseEndpoints(endpoints =>
+        app.MapGet("/.well-known/openid-configuration", async context =>
         {
-            endpoints.MapGet("/.well-known/openid-configuration", async context =>
+            await context.Response.WriteAsJsonAsync(new
+            {
+                issuer = BaseUrl,
+                authorization_endpoint = AuthorizationEndpoint,
+                token_endpoint = TokenEndpoint,
+                device_authorization_endpoint = DeviceCodeEndpoint,
+                jwks_uri = JwksEndpoint,
+                response_types_supported = new[] { "code" },
+                grant_types_supported = new[] { "authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code" },
+                id_token_signing_alg_values_supported = new[] { SecurityAlgorithms.RsaSha256 },
+                scopes_supported = new[] { "openid", "profile", "read_secrets" }
+            });
+        });
+
+        app.MapGet("/jwks", async context =>
+        {
+            await context.Response.WriteAsJsonAsync(new { keys = new[] { _jwk } });
+        });
+
+        app.MapGet("/authorize", async context =>
+        {
+            var redirectUri = context.Request.Query["redirect_uri"];
+            var state = context.Request.Query["state"];
+            var code = "auth_code_" + Guid.NewGuid();
+
+            lock (_lock)
+            {
+                _lastAuthCode = code;
+                _lastRefreshToken = "refresh_" + Guid.NewGuid();
+            }
+
+            context.Response.Redirect($"{redirectUri}?code={code}&state={state}");
+            await Task.CompletedTask;
+        });
+
+        app.MapPost("/token", async context =>
+        {
+            var form = await context.Request.ReadFormAsync();
+            var grantType = form["grant_type"].ToString();
+
+            if (grantType == "client_credentials")
             {
                 await context.Response.WriteAsJsonAsync(new
                 {
-                    issuer = BaseUrl,
-                    authorization_endpoint = AuthorizationEndpoint,
-                    token_endpoint = TokenEndpoint,
-                    device_authorization_endpoint = DeviceCodeEndpoint,
-                    jwks_uri = JwksEndpoint,
-                    response_types_supported = new[] { "code" },
-                    grant_types_supported = new[] { "authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code" },
-                    id_token_signing_alg_values_supported = new[] { SecurityAlgorithms.RsaSha256 },
-                    scopes_supported = new[] { "openid", "profile", "read_secrets" }
+                    access_token = ClientCredentialsToken,
+                    token_type = "Bearer",
+                    expires_in = 3600
                 });
-            });
+                return;
+            }
 
-            endpoints.MapGet("/jwks", async context =>
+            if (grantType == "authorization_code")
             {
-                await context.Response.WriteAsJsonAsync(new { keys = new[] { _jwk } });
-            });
-
-            endpoints.MapGet("/authorize", async context =>
-            {
-                var redirectUri = context.Request.Query["redirect_uri"];
-                var state = context.Request.Query["state"];
-                var code = "auth_code_" + Guid.NewGuid();
-
-                lock (_lock)
+                if (!string.Equals(form["code"], _lastAuthCode, StringComparison.Ordinal))
                 {
-                    _lastAuthCode = code;
-                    _lastRefreshToken = "refresh_" + Guid.NewGuid();
-                }
-
-                context.Response.Redirect($"{redirectUri}?code={code}&state={state}");
-                await Task.CompletedTask;
-            });
-
-            endpoints.MapPost("/token", async context =>
-            {
-                var form = await context.Request.ReadFormAsync();
-                var grantType = form["grant_type"].ToString();
-
-                if (grantType == "client_credentials")
-                {
-                    await context.Response.WriteAsJsonAsync(new
-                    {
-                        access_token = ClientCredentialsToken,
-                        token_type = "Bearer",
-                        expires_in = 3600
-                    });
+                    context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                    await context.Response.WriteAsync("Invalid code");
                     return;
                 }
 
-                if (grantType == "authorization_code")
-                {
-                    if (!string.Equals(form["code"], _lastAuthCode, StringComparison.Ordinal))
-                    {
-                        context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        await context.Response.WriteAsync("Invalid code");
-                        return;
-                    }
+                await WriteTokenResponse(context);
+                return;
+            }
 
-                    await WriteTokenResponse(context);
-                    return;
-                }
-
-                if (grantType == "refresh_token")
-                {
-                    await WriteTokenResponse(context);
-                    return;
-                }
-
-                if (grantType == "urn:ietf:params:oauth:grant-type:device_code")
-                {
-                    if (!string.Equals(form["device_code"], _lastDeviceCode, StringComparison.Ordinal))
-                    {
-                        context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        await context.Response.WriteAsync("{\"error\": \"invalid_device_code\"}");
-                        return;
-                    }
-
-                    if (!_deviceAuthorized)
-                    {
-                        context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
-                        await context.Response.WriteAsync("{\"error\": \"authorization_pending\"}");
-                        return;
-                    }
-
-                    await WriteTokenResponse(context);
-                    return;
-                }
-
-                context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
-                await context.Response.WriteAsync("{\"error\": \"unsupported_grant_type\"}");
-            });
-
-            endpoints.MapPost("/device/code", async context =>
+            if (grantType == "refresh_token")
             {
-                var deviceCode = "dc_" + Guid.NewGuid();
-                var userCode = "UC-" + Random.Shared.Next(1000, 9999);
+                await WriteTokenResponse(context);
+                return;
+            }
 
-                lock (_lock)
-                {
-                    _lastDeviceCode = deviceCode;
-                    _deviceAuthorized = false;
-                }
-
-                await context.Response.WriteAsJsonAsync(new
-                {
-                    device_code = deviceCode,
-                    user_code = userCode,
-                    verification_uri = VerificationEndpoint,
-                    expires_in = 300,
-                    interval = 1
-                });
-            });
-
-            endpoints.MapGet("/device/verify", async context =>
+            if (grantType == "urn:ietf:params:oauth:grant-type:device_code")
             {
-                lock (_lock)
+                if (!string.Equals(form["device_code"], _lastDeviceCode, StringComparison.Ordinal))
                 {
-                    _deviceAuthorized = true;
+                    context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                    await context.Response.WriteAsync("{\"error\": \"invalid_device_code\"}");
+                    return;
                 }
 
-                await context.Response.WriteAsync("Device authorized.");
+                if (!_deviceAuthorized)
+                {
+                    context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+                    await context.Response.WriteAsync("{\"error\": \"authorization_pending\"}");
+                    return;
+                }
+
+                await WriteTokenResponse(context);
+                return;
+            }
+
+            context.Response.StatusCode = (int)HttpStatusCode.BadRequest;
+            await context.Response.WriteAsync("{\"error\": \"unsupported_grant_type\"}");
+        });
+
+        app.MapPost("/device/code", async context =>
+        {
+            var deviceCode = "dc_" + Guid.NewGuid();
+            var userCode = "UC-" + Random.Shared.Next(1000, 9999);
+
+            lock (_lock)
+            {
+                _lastDeviceCode = deviceCode;
+                _deviceAuthorized = false;
+            }
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                device_code = deviceCode,
+                user_code = userCode,
+                verification_uri = VerificationEndpoint,
+                expires_in = 300,
+                interval = 1
             });
+        });
+
+        app.MapGet("/device/verify", async context =>
+        {
+            lock (_lock)
+            {
+                _deviceAuthorized = true;
+            }
+
+            await context.Response.WriteAsync("Device authorized.");
         });
     }
 

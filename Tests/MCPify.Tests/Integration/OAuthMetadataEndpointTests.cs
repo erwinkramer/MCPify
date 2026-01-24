@@ -113,33 +113,24 @@ public class OAuthMetadataEndpointTests
         Assert.Contains("https://auth.example.com", metadata!.AuthorizationServers);
     }
 
-    private async Task<IHost> CreateHostAsync(Action<IServiceProvider>? configure = null, Action<McpifyOptions>? configureOptions = null)
+    private static async Task<WebApplication> CreateHostAsync(Action<IServiceProvider>? configure = null, Action<McpifyOptions>? configureOptions = null)
     {
-        return await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder
-                    .UseTestServer()
-                    .ConfigureServices(services =>
-                    {
-                        services.AddMcpify(options =>
-                        {
-                            configureOptions?.Invoke(options);
-                        });
-                        services.AddLogging();
-                        services.AddRouting();
-                    })
-                    .Configure(app =>
-                    {
-                        configure?.Invoke(app.ApplicationServices);
-                        app.UseRouting();
-                        app.UseEndpoints(endpoints => 
-                        {
-                            endpoints.MapMcpifyEndpoint();
-                        });
-                    });
-            })
-            .StartAsync();
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+
+        builder.Services.AddMcpify(options =>
+        {
+            configureOptions?.Invoke(options);
+        });
+        builder.Services.AddLogging();
+
+        var app = builder.Build();
+
+        configure?.Invoke(app.Services);
+        app.MapMcpifyEndpoint();
+
+        await app.StartAsync();
+        return app;
     }
 
     private class ProtectedResourceMetadata

@@ -105,28 +105,22 @@ public class ClientCredentialsAuthenticationTests
         {
             var port = GetRandomUnusedPort();
             BaseUrl = $"http://localhost:{port}";
-            _host = Host.CreateDefaultBuilder()
-                .ConfigureWebHostDefaults(builder =>
+
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.UseUrls(BaseUrl);
+
+            var app = builder.Build();
+            app.MapPost("/token", async context =>
+            {
+                await context.Response.WriteAsJsonAsync(new
                 {
-                    builder.UseUrls(BaseUrl);
-                    builder.Configure(app =>
-                    {
-                        app.UseRouting();
-                        app.UseEndpoints(endpoints =>
-                        {
-                            endpoints.MapPost("/token", async context =>
-                            {
-                                await context.Response.WriteAsJsonAsync(new
-                                {
-                                    access_token = "cc_token",
-                                    token_type = "Bearer",
-                                    expires_in = 3600
-                                });
-                            });
-                        });
-                    });
-                })
-                .Build();
+                    access_token = "cc_token",
+                    token_type = "Bearer",
+                    expires_in = 3600
+                });
+            });
+
+            _host = app;
         }
 
         public async Task StartAsync() => await _host.StartAsync();
