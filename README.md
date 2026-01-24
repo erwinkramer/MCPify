@@ -96,8 +96,7 @@ var app = builder.Build();
 
 // Add Middleware (order matters!)
 app.UseMcpifyContext();           // Must be first
-app.UseMcpifyOAuth();             // Must come before UseAuthentication
-app.UseAuthentication();          // If using ASP.NET Core auth
+app.UseAuthentication();
 app.UseAuthorization();
 
 // ... Map your endpoints ...
