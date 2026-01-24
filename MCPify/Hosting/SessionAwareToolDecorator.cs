@@ -1,8 +1,7 @@
+using System.Linq;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using MCPify.Core;
 using MCPify.Core.Session;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -24,72 +23,7 @@ public class SessionAwareToolDecorator : McpServerTool
         _serviceProvider = serviceProvider;
     }
 
-    // Delegate ProtocolTool property to the inner tool but inject sessionId into schema
-    public override Tool ProtocolTool
-    {
-        get
-        {
-            var original = _innerTool.ProtocolTool;
-
-            // Skip modification for 'connect' tool as it doesn't need a session ID
-            if (original.Name.Equals("connect", StringComparison.OrdinalIgnoreCase))
-            {
-                return original;
-            }
-            
-            // If the schema is empty or not an object, just return original to be safe
-            if (original.InputSchema.ValueKind == JsonValueKind.Undefined || 
-                original.InputSchema.ValueKind == JsonValueKind.Null)
-            {
-                 return original;
-            }
-
-            try
-            {
-                // Parse the original schema to a mutable Node
-                var jsonNode = JsonNode.Parse(original.InputSchema.GetRawText());
-                if (jsonNode is JsonObject jsonObj)
-                {
-                    // Ensure 'type' is set to 'object' (Required for valid MCP schema)
-                    if (!jsonObj.ContainsKey("type"))
-                    {
-                        jsonObj["type"] = "object";
-                    }
-
-                    // Ensure 'properties' object exists
-                    if (!jsonObj.ContainsKey("properties"))
-                    {
-                        jsonObj["properties"] = new JsonObject();
-                    }
-                    
-                    var properties = jsonObj["properties"] as JsonObject;
-                    if (properties != null && !properties.ContainsKey("sessionId"))
-                    {
-                        // Inject sessionId property
-                        properties["sessionId"] = new JsonObject
-                        {
-                            ["type"] = "string",
-                            ["description"] = "The Session ID to maintain context across requests. Retrieve this via 'connect' tool."
-                        };
-                    }
-                    
-                    // We return a NEW Tool object with the modified schema
-                    return new Tool
-                    {
-                        Name = original.Name,
-                        Description = original.Description,
-                        InputSchema = JsonSerializer.SerializeToElement(jsonObj)
-                    };
-                }
-            }
-            catch
-            {
-                // Fallback if parsing fails
-            }
-
-            return original;
-        }
-    }
+    public override Tool ProtocolTool => _innerTool.ProtocolTool;
 
     // Delegate Metadata to the inner tool
     public override IReadOnlyList<object> Metadata => _innerTool.Metadata;
@@ -105,12 +39,14 @@ public class SessionAwareToolDecorator : McpServerTool
         // Ensure the RequestContext has Services (it should, but safety first)
         var services = context.Services ?? _serviceProvider;
         var accessor = services.GetService<IMcpContextAccessor>();
-        var httpContextAccessor = services.GetService<IHttpContextAccessor>();
 
         if (accessor != null)
         {
-            // 1. Try to get from arguments first (Client MUST provide this)
-            if (context.Params?.Arguments != null)
+            // Start with the session produced by the MCP server implementation.
+            var sessionId = context.Server?.SessionId;
+
+            // For backwards compatibility with older clients that send the sessionId explicitly.
+            if (string.IsNullOrEmpty(sessionId) && context.Params?.Arguments != null)
             {
                 // Case-insensitive lookup. FirstOrDefault returns default(KeyValuePair) if not found.
                 var argEntry = context.Params.Arguments.FirstOrDefault(x => x.Key.Equals("sessionId", StringComparison.OrdinalIgnoreCase));
@@ -120,55 +56,26 @@ public class SessionAwareToolDecorator : McpServerTool
                 {
                     if (argEntry.Value.ValueKind == JsonValueKind.String)
                     {
-                        accessor.SessionId = argEntry.Value.GetString();
+                        sessionId = argEntry.Value.GetString();
                     }
                     else
                     {
-                         // Fallback for other types (e.g. number/boolean) if user sent weird data
-                         accessor.SessionId = argEntry.Value.ToString();
+                        // Fallback for other types (e.g. number/boolean) if user sent unexpected data
+                        sessionId = argEntry.Value.ToString();
                     }
                 }
             }
 
-            // 2. HTTP Fallback: Check Cookies/Headers (for web clients)
-            if (string.IsNullOrEmpty(accessor.SessionId) && httpContextAccessor?.HttpContext != null)
-            {
-                // Accessor might already be populated by Middleware
-            }
-            
-            // 3. STRICT ENFORCEMENT for Non-HTTP (Stdio)
-            if (string.IsNullOrEmpty(accessor.SessionId) && httpContextAccessor?.HttpContext == null)
-            {
-                 return new CallToolResult 
-                 { 
-                     IsError = true,
-                     Content = new[] { new TextContentBlock { Text = "Session ID is required. You must call the 'connect' tool first to obtain a Session ID, and then provide it in the 'sessionId' argument for all subsequent calls." } }
-                 };
-            }
-            
             // Resolve the actual Principal if we have a Handle (for Lazy Auth support)
             var sessionMap = services.GetService<ISessionMap>();
-            if (sessionMap != null && !string.IsNullOrEmpty(accessor.SessionId))
+            if (sessionMap != null && !string.IsNullOrEmpty(sessionId))
             {
-                accessor.SessionId = sessionMap.ResolvePrincipal(accessor.SessionId);
+                sessionId = sessionMap.ResolvePrincipal(sessionId);
             }
 
-            // Ensure AsyncLocal is populated so deep services can access it
-            McpContextAccessor.CurrentContext = new McpContextAccessor.McpContext
-            {
-                SessionId = accessor.SessionId,
-                ConnectionId = accessor.ConnectionId,
-                AccessToken = accessor.AccessToken
-            };
+            accessor.SessionId = sessionId;
         }
 
-        try
-        {
-            return await _innerTool.InvokeAsync(context, token);
-        }
-        finally
-        {
-            McpContextAccessor.CurrentContext = null;
-        }
+        return await _innerTool.InvokeAsync(context, token);
     }
 }

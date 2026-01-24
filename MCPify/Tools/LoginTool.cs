@@ -30,10 +30,11 @@ public class LoginTool : McpServerTool
         var logger = context.Services != null ? context.Services.GetService<Microsoft.Extensions.Logging.ILogger<LoginTool>>() : null;
         var accessor = context.Services?.GetService<IMcpContextAccessor>();
 
-        string? sessionId = null;
+        string? sessionId = context.Server?.SessionId;
 
-        // 1. Try to get from arguments
-        if (context.Params?.Arguments != null &&
+        // 1. Try to get from arguments for backwards compatibility
+        if (string.IsNullOrEmpty(sessionId) &&
+            context.Params?.Arguments != null &&
             context.Params.Arguments.TryGetValue("sessionId", out var sessionElement) &&
             sessionElement.ValueKind == JsonValueKind.String &&
             !string.IsNullOrEmpty(sessionElement.GetString()))

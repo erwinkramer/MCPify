@@ -167,7 +167,6 @@ public class OAuthMiddlewareTests
         });
 
         var app = builder.Build();
-        app.UseMcpifyContext();
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapMcpifyEndpoint("/mcp");

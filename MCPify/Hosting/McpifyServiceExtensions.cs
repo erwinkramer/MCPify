@@ -167,14 +167,4 @@ public static class McpifyServiceExtensions
         return services;
     }
 
-    /// <summary>
-    /// Adds the MCP context middleware to the pipeline. This is required for accessing session and connection information.
-    /// </summary>
-    /// <param name="builder">The <see cref="IApplicationBuilder"/> instance.</param>
-    /// <returns>The <see cref="IApplicationBuilder"/> instance.</returns>
-    public static IApplicationBuilder UseMcpifyContext(this IApplicationBuilder builder)
-    {
-        return builder.UseMiddleware<McpContextMiddleware>();
-    }
-
 }

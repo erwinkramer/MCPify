@@ -95,7 +95,6 @@ builder.Services.AddMcpify(options =>
 var app = builder.Build();
 
 // Add Middleware (order matters!)
-app.UseMcpifyContext();           // Must be first
 app.UseAuthentication();
 app.UseAuthorization();
 

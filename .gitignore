@@ -54,3 +54,4 @@ AuthTokens/
 Sample/AuthTokens/
 
 .nuget/
+temp/
