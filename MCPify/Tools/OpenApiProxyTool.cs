@@ -21,6 +21,7 @@ public class OpenApiProxyTool : McpServerTool
     private readonly OpenApiOperationDescriptor _descriptor;
     private readonly McpifyOptions _options;
     private readonly Func<IServiceProvider, IAuthenticationProvider>? _authenticationFactory;
+    private IReadOnlyList<object>? _metadata;
 
     public OpenApiProxyTool(
         OpenApiOperationDescriptor descriptor,
@@ -56,7 +57,7 @@ public class OpenApiProxyTool : McpServerTool
         InputSchema = BuildInputSchema()
     };
 
-    public override IReadOnlyList<object> Metadata => Array.Empty<object>();
+    public override IReadOnlyList<object> Metadata => _metadata ??= BuildMetadata();
 
     public override async ValueTask<CallToolResult> InvokeAsync(
         RequestContext<CallToolRequestParams> context,
@@ -122,6 +123,44 @@ public class OpenApiProxyTool : McpServerTool
     {
         var schemaNode = JsonSerializer.SerializeToNode(_schema.GenerateInputSchema(_descriptor.Operation)) ?? new JsonObject();
         return JsonSerializer.SerializeToElement(schemaNode);
+    }
+
+    private IReadOnlyList<object> BuildMetadata()
+    {
+        if (_descriptor.Operation.Security is null || _descriptor.Operation.Security.Count == 0)
+        {
+            return Array.Empty<object>();
+        }
+
+        var patterns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var requirement in _descriptor.Operation.Security)
+        {
+            foreach (var scopes in requirement.Values)
+            {
+                if (scopes is null)
+                {
+                    continue;
+                }
+
+                foreach (var scope in scopes)
+                {
+                    if (string.IsNullOrWhiteSpace(scope))
+                    {
+                        continue;
+                    }
+
+                    patterns.Add(scope);
+                }
+            }
+        }
+
+        if (patterns.Count == 0)
+        {
+            return Array.Empty<object>();
+        }
+
+        return patterns.Select(pattern => (object)new ScopeRequirement(pattern)).ToArray();
     }
 
     private HttpRequestMessage BuildHttpRequest(Dictionary<string, JsonElement>? argsDict)

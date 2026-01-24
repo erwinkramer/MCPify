@@ -1,12 +1,14 @@
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
 using MCPify.Core;
 using MCPify.Core.Auth;
 using MCPify.Hosting;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -54,11 +56,46 @@ public class ScopeRequirementTests
     [InlineData("tool_*_admin", "tool_user_admin", true)]
     [InlineData("tool_*_admin", "tool_role_admin", true)]
     [InlineData("tool_*_admin", "tool_admin", false)]
-    public void Matches_WorksWithPatterns(string pattern, string toolName, bool expected)
+    public void Matches_WorksWithPatterns(string pattern, string candidate, bool expected)
     {
-        _ = pattern;
-        _ = toolName;
-        _ = expected;
+        var requirement = new ScopeRequirement { Pattern = pattern };
+        Assert.Equal(expected, requirement.Matches(candidate));
+    }
+
+    [Fact]
+    public void Matches_IsCaseInsensitive()
+    {
+        var requirement = new ScopeRequirement { Pattern = "Admin_*" };
+
+        Assert.True(requirement.Matches("admin_users"));
+        Assert.True(requirement.Matches("ADMIN_ROLES"));
+        Assert.True(requirement.Matches("Admin_Tools"));
+    }
+
+    [Fact]
+    public async Task Handler_Succeeds_WhenScopeMatches()
+    {
+        var requirement = new ScopeRequirement("api.read");
+        var handler = new ScopeRequirementHandler();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("scope", "api.read api.write") }, "test"));
+
+        var context = new AuthorizationHandlerContext(new[] { requirement }, principal, null);
+        await handler.HandleAsync(context);
+
+        Assert.True(context.HasSucceeded);
+    }
+
+    [Fact]
+    public async Task Handler_Fails_WhenScopeMissing()
+    {
+        var requirement = new ScopeRequirement("api.admin");
+        var handler = new ScopeRequirementHandler();
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("scp", "api.read") }, "test"));
+
+        var context = new AuthorizationHandlerContext(new[] { requirement }, principal, null);
+        await handler.HandleAsync(context);
+
+        Assert.False(context.HasSucceeded);
     }
 
     private static async Task<WebApplication> CreateHostAsync(Action<McpifyOptions>? configureOptions = null)

@@ -15,6 +15,7 @@ using System.IO;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using ModelContextProtocol.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authorization;
 
 namespace MCPify.Hosting;
 
@@ -106,6 +107,8 @@ public static class McpifyServiceExtensions
             oauthStore.AddConfiguration(config);
         }
         services.AddSingleton(oauthStore);
+
+        services.AddSingleton<IAuthorizationHandler, ScopeRequirementHandler>();
 
         services.TryAddEnumerable(ServiceDescriptor.Transient<IConfigureOptions<McpAuthenticationOptions>, McpAuthenticationOptionsSetup>());
         services.TryAddEnumerable(ServiceDescriptor.Transient<IConfigureNamedOptions<McpAuthenticationOptions>, McpAuthenticationOptionsSetup>());
