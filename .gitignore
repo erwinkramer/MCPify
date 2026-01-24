@@ -52,3 +52,5 @@ demo_token.json
 ## misc
 AuthTokens/
 Sample/AuthTokens/
+
+.nuget/

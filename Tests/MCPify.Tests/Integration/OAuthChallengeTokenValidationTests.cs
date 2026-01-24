@@ -1,5 +1,7 @@
+using System;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Linq;
 using System.Text;
 using MCPify.Core;
 using MCPify.Core.Auth;
@@ -15,33 +17,33 @@ namespace MCPify.Tests.Integration;
 public class OAuthChallengeTokenValidationTests
 {
     [Fact]
-    public async Task PostWithoutSession_ReturnsUnauthorizedChallenge_WhenTokenValidationEnabled()
+    public async Task PostWithoutSession_ReturnsUnauthorizedChallenge_WhenAuthenticationRequired()
     {
         await using var host = await CreateHostAsync();
-
-        var options = host.Services.GetRequiredService<McpifyOptions>();
-        Assert.True(options.TokenValidation?.EnableJwtValidation, "Token validation should be enabled");
-        var validationOptions = host.Services.GetRequiredService<TokenValidationOptions>();
-        Assert.True(validationOptions.EnableJwtValidation, "TokenValidationOptions from DI should have EnableJwtValidation true");
-
         var client = host.GetTestClient();
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/")
-        {
-            Content = new StringContent("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\"params\":{}}", Encoding.UTF8, "application/json")
-        };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        var payload = """
+        {
+            "jsonrpc": "2.0",
+            "method": "ping",
+            "params": {},
+            "id": 1
+        }
+        """;
+        request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
 
         var response = await client.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
-
         var authenticateHeader = string.Join(" | ", response.Headers.WwwAuthenticate.Select(h => h.ToString()));
-        Assert.True(response.StatusCode == HttpStatusCode.Unauthorized,
-            $"Expected 401 challenge, got {(int)response.StatusCode} {response.StatusCode}. Headers: {authenticateHeader}. Body: {body}");
 
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         Assert.Contains(response.Headers.WwwAuthenticate, header =>
             string.Equals(header.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("resource_metadata", authenticateHeader);
+        Assert.True(body.Length == 0, $"Expected empty body but received: {body}");
     }
 
     private static async Task<WebApplication> CreateHostAsync()
@@ -50,20 +52,26 @@ public class OAuthChallengeTokenValidationTests
         builder.WebHost.UseTestServer();
 
         builder.Services.AddLogging();
+        builder.Services.AddAuthorization();
         builder.Services.AddMcpify(options =>
         {
             options.Transport = McpTransportType.Http;
-            options.TokenValidation = new TokenValidationOptions
+            options.OAuthConfigurations.Add(new OAuth2Configuration
             {
-                EnableJwtValidation = true,
-                ValidateAudience = true
-            };
+                AuthorizationUrl = "https://auth.example.com/authorize",
+                TokenUrl = "https://auth.example.com/token",
+                Scopes = new Dictionary<string, string>
+                {
+                    { "read", "Read access" }
+                }
+            });
         });
 
         var app = builder.Build();
         app.UseMcpifyContext();
-        app.UseMcpifyOAuth();
-        app.MapMcpifyEndpoint();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapMcpifyEndpoint("/mcp");
 
         await app.StartAsync();
         return app;

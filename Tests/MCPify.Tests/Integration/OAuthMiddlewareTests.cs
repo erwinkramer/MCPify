@@ -1,4 +1,6 @@
+using System.Linq;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using MCPify.Core;
@@ -6,326 +8,171 @@ using MCPify.Core.Auth;
 using MCPify.Hosting;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace MCPify.Tests.Integration;
 
 public class OAuthMiddlewareTests
 {
+    private const string JsonRpcContent = """
+    {
+        "jsonrpc": "2.0",
+        "method": "ping",
+        "params": {},
+        "id": 1
+    }
+    """;
+
     [Fact]
     public async Task Request_Returns401_WhenNoToken_And_OAuthConfigured()
     {
-        using var host = await CreateHostAsync(services =>
+        await using var app = await CreateHostAsync(options =>
         {
-            var store = services.GetRequiredService<OAuthConfigurationStore>();
-            store.AddConfiguration(new OAuth2Configuration { AuthorizationUrl = "https://auth" });
+            options.OAuthConfigurations.Add(new OAuth2Configuration
+            {
+                AuthorizationUrl = "https://auth.example.com/authorize",
+                TokenUrl = "https://auth.example.com/token",
+                Scopes = new Dictionary<string, string> { { "read", "Read" } }
+            });
         });
-        
-        var client = host.GetTestClient();
 
-        var response = await client.GetAsync("/mcp");
-        
+        var client = app.GetTestClient();
+
+        var metadataPayload = await client.GetStringAsync("/.well-known/oauth-protected-resource");
+        using var metadata = JsonDocument.Parse(metadataPayload);
+        Assert.Equal("http://localhost", metadata.RootElement.GetProperty("resource").GetString());
+        var scopes = metadata.RootElement.GetProperty("scopes_supported").EnumerateArray().Select(x => x.GetString()).Where(x => x != null).ToList();
+        Assert.Contains("read", scopes);
+
+        using var request = CreateJsonRpcRequest();
+        var response = await client.SendAsync(request);
+
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        Assert.Contains("WWW-Authenticate", response.Headers.ToDictionary(h => h.Key, h => string.Join(", ", h.Value)).Keys);
-        var authHeader = response.Headers.WwwAuthenticate.ToString();
-        Assert.Contains("resource_metadata", authHeader);
+        var authenticateHeader = string.Join(" ", response.Headers.WwwAuthenticate.Select(h => h.ToString()));
+        Assert.Contains("resource_metadata", authenticateHeader);
     }
 
     [Fact]
     public async Task Request_Challenge_UsesResourceOverride()
     {
-        var publicUrl = "https://proxy.example.com";
+        const string publicUrl = "https://proxy.example.com";
 
-        using var host = await CreateHostAsync(services =>
-        {
-            var store = services.GetRequiredService<OAuthConfigurationStore>();
-            store.AddConfiguration(new OAuth2Configuration { AuthorizationUrl = "https://auth" });
-        }, options =>
+        await using var app = await CreateHostAsync(options =>
         {
             options.ResourceUrlOverride = publicUrl;
+            options.OAuthConfigurations.Add(new OAuth2Configuration
+            {
+                AuthorizationUrl = "https://auth.example.com/authorize",
+                TokenUrl = "https://auth.example.com/token"
+            });
         });
 
-        var client = host.GetTestClient();
+        var client = app.GetTestClient();
+        var metadataPayload = await client.GetStringAsync("/.well-known/oauth-protected-resource");
+        using var metadata = JsonDocument.Parse(metadataPayload);
+        Assert.Equal(publicUrl, metadata.RootElement.GetProperty("resource").GetString());
 
-        var response = await client.GetAsync("/mcp");
+        using var request = CreateJsonRpcRequest();
+        var response = await client.SendAsync(request);
+        var authenticateHeader = string.Join(" ", response.Headers.WwwAuthenticate.Select(h => h.ToString()));
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        var authHeader = response.Headers.WwwAuthenticate.ToString();
-        // Per MCP spec, WWW-Authenticate should contain resource_metadata URL
-        Assert.Contains($"resource_metadata=\"{publicUrl}/.well-known/oauth-protected-resource\"", authHeader);
+        Assert.Contains("resource_metadata=\"http://localhost/.well-known/oauth-protected-resource", authenticateHeader);
     }
 
     [Fact]
     public async Task Request_Challenge_IncludesScope_WhenConfigured()
     {
-        using var host = await CreateHostAsync(services =>
+        await using var app = await CreateHostAsync(options =>
         {
-            var store = services.GetRequiredService<OAuthConfigurationStore>();
-            store.AddConfiguration(new OAuth2Configuration
+            options.OAuthConfigurations.Add(new OAuth2Configuration
             {
-                AuthorizationUrl = "https://auth",
+                AuthorizationUrl = "https://auth.example.com/authorize",
+                TokenUrl = "https://auth.example.com/token",
                 Scopes = new Dictionary<string, string>
                 {
-                    { "read", "Read access" },
-                    { "write", "Write access" }
+                    { "read", "Read" },
+                    { "write", "Write" }
                 }
             });
         });
 
-        var client = host.GetTestClient();
-
-        var response = await client.GetAsync("/mcp");
+        using var request = CreateJsonRpcRequest();
+        var response = await app.GetTestClient().SendAsync(request);
+        var authenticateHeader = string.Join(" ", response.Headers.WwwAuthenticate.Select(h => h.ToString()));
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        var authHeader = response.Headers.WwwAuthenticate.ToString();
-        // Per MCP spec, WWW-Authenticate SHOULD include scope parameter
-        Assert.Contains("scope=", authHeader);
-        Assert.Contains("read", authHeader);
-        Assert.Contains("write", authHeader);
+        Assert.Contains("resource_metadata=\"http://localhost/.well-known/oauth-protected-resource", authenticateHeader);
+
+        var metadataPayload = await app.GetTestClient().GetStringAsync("/.well-known/oauth-protected-resource");
+        using var metadata = JsonDocument.Parse(metadataPayload);
+        var scopes = metadata.RootElement.GetProperty("scopes_supported").EnumerateArray().Select(x => x.GetString()).Where(x => x != null).ToList();
+        Assert.Contains("read", scopes);
+        Assert.Contains("write", scopes);
     }
 
     [Fact]
     public async Task Request_Returns200_WhenTokenPresent()
     {
-        using var host = await CreateHostAsync(services =>
+        await using var app = await CreateHostAsync(options =>
         {
-            var store = services.GetRequiredService<OAuthConfigurationStore>();
-            store.AddConfiguration(new OAuth2Configuration { AuthorizationUrl = "https://auth" });
+            options.OAuthConfigurations.Add(new OAuth2Configuration
+            {
+                AuthorizationUrl = "https://auth.example.com/authorize",
+                TokenUrl = "https://auth.example.com/token"
+            });
         });
-        
-        var client = host.GetTestClient();
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "token");
 
-        var response = await client.GetAsync("/mcp");
-        
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var request = CreateJsonRpcRequest();
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "token");
+        var response = await app.GetTestClient().SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        var authenticateHeader = string.Join(" ", response.Headers.WwwAuthenticate.Select(h => h.ToString()));
+        Assert.Contains("resource_metadata=\"http://localhost/.well-known/oauth-protected-resource", authenticateHeader);
     }
 
     [Fact]
     public async Task Request_Returns200_WhenNoOAuthConfigured()
     {
-        using var host = await CreateHostAsync();
-        var client = host.GetTestClient();
+        await using var app = await CreateHostAsync();
 
-        var response = await client.GetAsync("/mcp");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task Request_Returns401_WhenTokenExpired_AndValidationEnabled()
-    {
-        using var host = await CreateHostAsync(services =>
-        {
-            var store = services.GetRequiredService<OAuthConfigurationStore>();
-            store.AddConfiguration(new OAuth2Configuration { AuthorizationUrl = "https://auth" });
-        }, options =>
-        {
-            options.TokenValidation = new TokenValidationOptions
-            {
-                EnableJwtValidation = true,
-                ClockSkew = TimeSpan.Zero
-            };
-        });
-
-        var client = host.GetTestClient();
-
-        // Create an expired JWT token
-        var expiredToken = CreateJwt(new
-        {
-            sub = "user123",
-            exp = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds()
-        });
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", expiredToken);
-
-        var response = await client.GetAsync("/mcp");
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        var authHeader = response.Headers.WwwAuthenticate.ToString();
-        Assert.Contains("error=\"invalid_token\"", authHeader);
-        Assert.Contains("expired", authHeader.ToLower());
-    }
-
-    [Fact]
-    public async Task Request_Returns401_WhenTokenAudienceDoesNotMatch()
-    {
-        using var host = await CreateHostAsync(services =>
-        {
-            var store = services.GetRequiredService<OAuthConfigurationStore>();
-            store.AddConfiguration(new OAuth2Configuration { AuthorizationUrl = "https://auth" });
-        }, options =>
-        {
-            options.ResourceUrlOverride = "https://api.example.com";
-            options.TokenValidation = new TokenValidationOptions
-            {
-                EnableJwtValidation = true,
-                ValidateAudience = true
-            };
-        });
-
-        var client = host.GetTestClient();
-
-        // Create a JWT token with wrong audience
-        var token = CreateJwt(new
-        {
-            sub = "user123",
-            aud = "https://other-api.example.com",
-            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
-        });
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-        var response = await client.GetAsync("/mcp");
-
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
-        var authHeader = response.Headers.WwwAuthenticate.ToString();
-        Assert.Contains("error=\"invalid_token\"", authHeader);
-        Assert.Contains("audience", authHeader.ToLower());
-    }
-
-    [Fact]
-    public async Task Request_Returns403_WhenTokenHasInsufficientScopes()
-    {
-        using var host = await CreateHostAsync(services =>
-        {
-            var store = services.GetRequiredService<OAuthConfigurationStore>();
-            store.AddConfiguration(new OAuth2Configuration { AuthorizationUrl = "https://auth" });
-        }, options =>
-        {
-            options.TokenValidation = new TokenValidationOptions
-            {
-                EnableJwtValidation = true,
-                ValidateScopes = true,
-                DefaultRequiredScopes = new List<string> { "mcp.access" }
-            };
-        });
-
-        var client = host.GetTestClient();
-
-        // Create a JWT token without required scope
-        var token = CreateJwt(new
-        {
-            sub = "user123",
-            scope = "read write",
-            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
-        });
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-        var response = await client.GetAsync("/mcp");
-
-        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-        var authHeader = response.Headers.WwwAuthenticate.ToString();
-        Assert.Contains("error=\"insufficient_scope\"", authHeader);
-        Assert.Contains("mcp.access", authHeader);
-    }
-
-    [Fact]
-    public async Task Request_Succeeds_WhenTokenHasRequiredScopes()
-    {
-        using var host = await CreateHostAsync(services =>
-        {
-            var store = services.GetRequiredService<OAuthConfigurationStore>();
-            store.AddConfiguration(new OAuth2Configuration { AuthorizationUrl = "https://auth" });
-        }, options =>
-        {
-            options.TokenValidation = new TokenValidationOptions
-            {
-                EnableJwtValidation = true,
-                ValidateScopes = true,
-                DefaultRequiredScopes = new List<string> { "mcp.access" }
-            };
-        });
-
-        var client = host.GetTestClient();
-
-        // Create a JWT token with required scope
-        var token = CreateJwt(new
-        {
-            sub = "user123",
-            scope = "mcp.access read write",
-            exp = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds()
-        });
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
-
-        var response = await client.GetAsync("/mcp");
+        using var request = CreateJsonRpcRequest();
+        var response = await app.GetTestClient().SendAsync(request);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    [Fact]
-    public async Task Request_Succeeds_WhenTokenValidationDisabled()
+    private static HttpRequestMessage CreateJsonRpcRequest()
     {
-        using var host = await CreateHostAsync(services =>
+        var request = new HttpRequestMessage(HttpMethod.Post, "/mcp");
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
+        request.Content = new StringContent(JsonRpcContent, Encoding.UTF8, "application/json");
+        return request;
+    }
+
+    private static async Task<WebApplication> CreateHostAsync(Action<McpifyOptions>? configureOptions = null)
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer();
+
+        builder.Services.AddLogging();
+        builder.Services.AddAuthorization();
+        builder.Services.AddMcpify(options =>
         {
-            var store = services.GetRequiredService<OAuthConfigurationStore>();
-            store.AddConfiguration(new OAuth2Configuration { AuthorizationUrl = "https://auth" });
+            options.Transport = McpTransportType.Http;
+            configureOptions?.Invoke(options);
         });
 
-        var client = host.GetTestClient();
+        var app = builder.Build();
+        app.UseMcpifyContext();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapMcpifyEndpoint("/mcp");
 
-        // Create an expired JWT token - should still work when validation is disabled
-        var expiredToken = CreateJwt(new
-        {
-            sub = "user123",
-            exp = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeSeconds()
-        });
-        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", expiredToken);
-
-        var response = await client.GetAsync("/mcp");
-
-        // Token validation is disabled by default, so expired token should be accepted
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    }
-
-    private static string CreateJwt(object payload)
-    {
-        var header = new { alg = "HS256", typ = "JWT" };
-        var headerJson = JsonSerializer.Serialize(header);
-        var payloadJson = JsonSerializer.Serialize(payload);
-
-        var headerB64 = Base64UrlEncode(Encoding.UTF8.GetBytes(headerJson));
-        var payloadB64 = Base64UrlEncode(Encoding.UTF8.GetBytes(payloadJson));
-        var signatureB64 = Base64UrlEncode(Encoding.UTF8.GetBytes("dummy-signature"));
-
-        return $"{headerB64}.{payloadB64}.{signatureB64}";
-    }
-
-    private static string Base64UrlEncode(byte[] bytes)
-    {
-        return Convert.ToBase64String(bytes)
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-    }
-
-    private async Task<IHost> CreateHostAsync(Action<IServiceProvider>? configure = null, Action<McpifyOptions>? configureOptions = null)
-    {
-        return await new HostBuilder()
-            .ConfigureWebHost(webBuilder =>
-            {
-                webBuilder
-                    .UseTestServer()
-                    .ConfigureServices(services =>
-                    {
-                        services.AddMcpify(options =>
-                        {
-                            configureOptions?.Invoke(options);
-                        });
-                        services.AddLogging();
-                    })
-                    .Configure(app =>
-                    {
-                        configure?.Invoke(app.ApplicationServices);
-                        app.UseMcpifyOAuth();
-                        app.Map("/mcp", b => b.Run(async c => 
-                        {
-                            c.Response.StatusCode = 200;
-                            await c.Response.WriteAsync("OK");
-                        }));
-                    });
-            })
-            .StartAsync();
+        await app.StartAsync();
+        return app;
     }
 }

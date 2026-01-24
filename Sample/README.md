@@ -130,46 +130,21 @@ Attach these either to `options.LocalEndpoints.AuthenticationFactory` or to a sp
 ### Pass-through Bearer Tokens
 If your MCP client already sends `Authorization: Bearer <token>` to the sample, MCPify will forward that token via `IMcpContextAccessor.AccessToken` instead of using stored OAuth/client-credentials tokens.
 
-### Token Validation (Optional)
+### Protected Resource Metadata
 
-MCPify supports JWT token validation for enhanced security. Enable it by configuring `TokenValidation`:
+The sample relies on the ASP.NET Core authentication handler from `ModelContextProtocol.AspNetCore`. `AddMcpify` registers the handler and automatically mirrors any OAuth configurations into the protected-resource metadata served to clients.
+
+If you need to tweak what gets advertised (for example to add additional scopes or documentation links), configure `McpAuthenticationOptions` in `Program.cs`:
 
 ```csharp
-builder.Services.AddMcpify(options =>
+builder.Services.PostConfigure<McpAuthenticationOptions>(options =>
 {
-    options.ResourceUrlOverride = baseUrl;
-
-    // OAuth scopes are already configured via OAuthConfigurations
-    // You can require these scopes automatically:
-    options.TokenValidation = new TokenValidationOptions
-    {
-        EnableJwtValidation = true,           // Parse and validate JWT tokens
-        ValidateAudience = true,              // Validate 'aud' claim
-        ValidateScopes = true,                // Validate required scopes
-        RequireOAuthConfiguredScopes = true   // Auto-require scopes from OAuth2Configuration
-    };
-
-    // Or define per-tool scope requirements for finer control
-    options.ScopeRequirements = new()
-    {
-        new ScopeRequirement
-        {
-            Pattern = "api_secrets_*",
-            RequiredScopes = new() { "read_secrets" }
-        }
-    };
+  options.ResourceMetadata ??= new ProtectedResourceMetadata();
+  options.ResourceMetadata.Documentation = new Uri("https://localhost:5005/docs");
 });
 ```
 
-**Note:** Setting `RequireOAuthConfiguredScopes = true` automatically requires all scopes from:
--   Scopes defined in `OAuthConfigurations`
--   Scopes discovered from OpenAPI security schemes (e.g., OAuth2 configured for Swagger UI)
-
-This means if your OpenAPI spec already defines OAuth2 scopes, MCPify will automatically enforce them during token validation - no duplicate configuration needed.
-
-When token validation is enabled, MCPify returns:
--   **401 Unauthorized** with `error="invalid_token"` for expired or invalid tokens
--   **403 Forbidden** with `error="insufficient_scope"` for valid tokens missing required scopes
+Ensure the middleware pipeline includes both `app.UseAuthentication();` and `app.UseAuthorization();` so that challenges and metadata responses are handled by the official MCP authentication scheme.
 
 ### Relevant configuration knobs
 These can be configured in `appsettings.json` or via command-line arguments.

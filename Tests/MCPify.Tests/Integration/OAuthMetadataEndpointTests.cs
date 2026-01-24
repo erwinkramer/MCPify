@@ -1,3 +1,4 @@
+using System;
 using System.Net;
 using System.Net.Http.Json;
 using System.Linq;
@@ -17,14 +18,20 @@ namespace MCPify.Tests.Integration;
 public class OAuthMetadataEndpointTests
 {
     [Fact]
-    public async Task GetMetadata_Returns404_WhenNoOAuthConfigured()
+    public async Task GetMetadata_ReturnsDefaultMetadata_WhenNoOAuthConfigured()
     {
         using var host = await CreateHostAsync();
         var client = host.GetTestClient();
 
         var response = await client.GetAsync("/.well-known/oauth-protected-resource");
-        
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var metadata = await response.Content.ReadFromJsonAsync<ProtectedResourceMetadata>();
+        Assert.NotNull(metadata);
+        Assert.False(string.IsNullOrWhiteSpace(metadata!.Resource));
+        Assert.NotNull(metadata.AuthorizationServers);
+        Assert.NotNull(metadata.ScopesSupported);
     }
 
     [Fact]
@@ -110,7 +117,7 @@ public class OAuthMetadataEndpointTests
 
         var metadata = await response.Content.ReadFromJsonAsync<ProtectedResourceMetadata>();
         Assert.NotNull(metadata);
-        Assert.Contains("https://auth.example.com", metadata!.AuthorizationServers);
+        Assert.Contains(metadata!.AuthorizationServers, server => server.StartsWith("https://auth.example.com", StringComparison.OrdinalIgnoreCase));
     }
 
     private static async Task<WebApplication> CreateHostAsync(Action<IServiceProvider>? configure = null, Action<McpifyOptions>? configureOptions = null)
