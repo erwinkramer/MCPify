@@ -1,6 +1,22 @@
 # MCPify
 
+[![NuGet](https://img.shields.io/nuget/v/MCPify.svg)](https://www.nuget.org/packages/MCPify/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 **MCPify** is a .NET library that bridges the gap between your existing ASP.NET Core APIs (or external OpenAPI/Swagger specs) and the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/). It allows you to expose API operations as MCP tools that can be consumed by AI assistants like Claude Desktop, ensuring seamless integration with your existing services.
+
+> **Latest Release:** v0.0.12 - Now with enhanced OAuth middleware and improved testing infrastructure!
+
+## What's New
+
+### v0.0.12 (Latest - Jan 23, 2026)
+-   **Enhanced OAuth Middleware**: Improved OAuth authentication middleware with better error handling and token management (#17)
+-   **JWT Token Validation**: Full support for JWT access token validation including expiration, audience, and scope verification (#15)
+-   **Per-Tool Scope Requirements**: Define granular scope requirements for specific tools using pattern matching (#15)
+-   **Automatic Scope Discovery**: Scopes are automatically extracted from OpenAPI security schemes and enforced during validation (#15)
+-   **WWW-Authenticate Header**: Improved WWW-Authenticate header to include scope parameter per MCP spec
+-   **LoginBrowserBehavior**: Control browser launch behavior for OAuth login in headless environments
+-   **OAuth2Configuration List**: Support for multiple OAuth providers with AuthorizationServers exposure (#13)
 
 ## Features
 
@@ -43,10 +59,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 // ... Add other services ...
 
-// 1. Add MCPify services
+// Add MCPify services
 builder.Services.AddMcpify(options =>
 {
-    // Choose Transport (Stdio for local tools, Http for remote)
+    // Stdio for local tools (Claude Desktop), Http for remote servers
     options.Transport = McpTransportType.Stdio;
 
     // Option A: Expose Local Endpoints
@@ -54,29 +70,39 @@ builder.Services.AddMcpify(options =>
     {
         Enabled = true,
         ToolPrefix = "myapp_",
-        // Optional: Filter which endpoints to expose
-        Filter = op => op.Route.StartsWith("/api")
+        BaseUrlOverride = "https://localhost:5001",  // Optional: override base URL
+        Filter = op => op.Route.StartsWith("/api"),  // Optional: filter endpoints
+        AuthenticationFactory = sp => sp.GetRequiredService<OAuthAuthorizationCodeAuthentication>()  // Optional
     };
 
-    // Option B: Expose External APIs via Swagger
+    // Option B: Expose External APIs from URL
     options.ExternalApis.Add(new ExternalApiOptions
     {
         ApiBaseUrl = "https://petstore.swagger.io/v2",
         OpenApiUrl = "https://petstore.swagger.io/v2/swagger.json",
         ToolPrefix = "petstore_"
     });
+
+    // Option C: Expose External APIs from Local File
+    options.ExternalApis.Add(new ExternalApiOptions
+    {
+        ApiBaseUrl = "https://api.example.com",
+        OpenApiFilePath = "path/to/openapi-spec.json",  // or .yaml
+        ToolPrefix = "myapi_"
+    });
 });
 
 var app = builder.Build();
 
-// 2. Add Middleware
-app.UseMcpifyContext();
-app.UseAuthentication();
+// Add Middleware (order matters!)
+app.UseMcpifyContext();           // Must be first
+app.UseMcpifyOAuth();             // Must come before UseAuthentication
+app.UseAuthentication();          // If using ASP.NET Core auth
 app.UseAuthorization();
 
 // ... Map your endpoints ...
 
-// 3. Map the MCP endpoint (required for Http transport, optional for Stdio)
+// Map the MCP endpoint (required for Http transport)
 app.MapMcpifyEndpoint();
 
 app.Run();
@@ -107,11 +133,11 @@ To use your MCPify app with [Claude Desktop](https://claude.ai/download), edit y
 
 ## Authentication
 
-MCPify provides a first-class experience for APIs secured with OAuth 2.0.
+MCPify provides comprehensive OAuth 2.0 authentication support with automatic token management, validation, and scope enforcement.
 
 ### Enabling OAuth
 
-Register the authentication provider in your `Program.cs`:
+Register the authentication provider in your `Program.cs` (ensure this is done before calling `AddMcpify`):
 
 ```csharp
 services.AddScoped<OAuthAuthorizationCodeAuthentication>(sp => {
@@ -170,7 +196,35 @@ With `Auto` mode, MCPify detects headless environments by checking:
 
 MCPify now relies on the official `ModelContextProtocol.AspNetCore` authentication handler for OAuth 2.0. When you call `AddMcpify`, the MCP authentication scheme is registered automatically and the handler issues `WWW-Authenticate` challenges that point back to the protected resource metadata endpoint.
 
-OAuth configurations you provide through `McpifyOptions.OAuthConfigurations` (and those discovered from OpenAPI documents) are automatically surfaced to the handler so that clients know which scopes and authorization servers to use.
+```csharp
+builder.Services.AddMcpify(options =>
+{
+    // Set the resource URL for audience validation
+    options.ResourceUrlOverride = "https://api.example.com";
+
+    // Configure OAuth provider(s)
+    options.OAuthConfigurations.Add(new OAuth2Configuration
+    {
+        AuthorizationUrl = "https://auth.example.com/authorize",
+        TokenUrl = "https://auth.example.com/token",
+        Scopes = new Dictionary<string, string>
+        {
+            { "read", "Read access" },
+            { "write", "Write access" }
+        }
+    });
+
+    // Enable token validation (opt-in for backward compatibility)
+    options.TokenValidation = new TokenValidationOptions
+    {
+        EnableJwtValidation = true,
+        ValidateAudience = true,
+        ValidateScopes = true,
+        RequireOAuthConfiguredScopes = true,  // Auto-require scopes from OAuth config
+        ClockSkew = TimeSpan.FromMinutes(5)
+    };
+});
+```
 
 If you need to customize the advertised metadata—for example to add documentation links or override the detected resource URL—you can configure `McpAuthenticationOptions`:
 
@@ -192,7 +246,6 @@ MCPify automatically includes the [RFC 8707](https://datatracker.ietf.org/doc/ht
 builder.Services.AddMcpify(options =>
 {
     options.ResourceUrlOverride = "https://api.example.com";
-    // ...
 });
 ```
 
